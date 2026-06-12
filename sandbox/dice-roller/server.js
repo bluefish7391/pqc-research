@@ -1,13 +1,19 @@
 const http = require('http');
+const fs = require('fs');
+const path = require('path');
 
 const server = http.createServer((req, res) => {
-    const roll = Math.floor(Math.random() * 6) + 1; // Simulate rolling a six-sided die
-    res.writeHead(200, { 'Content-Type': 'text/html' });
-    res.end(`
-        <h1>Dice Roller</h1>
-        <p>You rolled a: ${roll}</p>
-        <button onclick="window.location.reload()">Roll again</button>
-    `);
+    const filePath = path.join(__dirname, 'index.html');
+
+    fs.readFile(filePath, (err, content) => {
+        if (err) {
+            res.writeHead(500, { 'Content-Type': 'text/plain' });
+            res.end('Internal Server Error: Missing HTML file');
+        } else {
+            res.writeHead(200, { 'Content-Type': 'text/html' });
+            res.end(content);
+        }
+    });
 });
 
 server.listen(3000, () => {
