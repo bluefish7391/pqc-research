@@ -3,7 +3,8 @@ import { sleep } from 'k6';
 
 export const options = {
     duration: '10s',
-    vus: 10
+    vus: 10,
+    summaryTrendStats: ['avg', 'min', 'med', 'max', 'p(95)', 'p(99)', 'p(99.9)']
 }
 
 export default function () {
