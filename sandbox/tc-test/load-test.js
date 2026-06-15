@@ -1,3 +1,9 @@
+
+/**
+ * k6 does not support standardized quantum-safe protocols.
+ * This script will not work with OQS's web server image.
+ */
+
 import https from 'k6/http';
 import { sleep } from 'k6';
 
