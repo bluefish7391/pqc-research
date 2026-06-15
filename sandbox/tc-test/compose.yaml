@@ -1,0 +1,26 @@
+services:
+  web-server:
+    image: openquantumsafe/nginx:latest
+    user: root  
+    ports:
+      - "8080:80"
+      - "8443:443"
+    volumes:
+      - .:/usr/share/nginx/html
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    cap_add:
+      - NET_ADMIN
+    command: >
+      sh -c "apk add --no-cache iproute2 iproute2-tc openssl &&
+             mkdir -p /etc/nginx/ssl &&
+             openssl req -x509 -nodes -days 365 -newkey rsa:2048 -keyout /etc/nginx/ssl/nginx.key -out /etc/nginx/ssl/nginx.crt -subj '/CN=localhost' &&
+             tc qdisc add dev eth0 root netem delay 150ms 20ms loss 10% &&
+             nginx -g 'daemon off;'"
+
+  load-tester:
+    image: openquantumsafe/curl:latest
+    volumes:
+      - .:/workspace
+    working_dir: /workspace
+    entrypoint: ["tail", "-f", "/dev/null"] # Keeps the container alive in the background
+    profiles: ["tester"] # Prevents it from starting automatically with your web server
