@@ -6,7 +6,11 @@
 # Then, to start up the virtual users, run:
 # docker compose run --rm --entrypoint sh load-tester ./run-load.sh
 
-OUTPUT_FILE="metrics_$(date +%Y%m%d_%H%M%S).csv"
+OUTPUT_DIR="metrics"
+
+mkdir -p "$OUTPUT_DIR"
+
+OUTPUT_FILE="$OUTPUT_DIR/metrics_$(date +%Y%m%d_%H%M%S).csv"
 
 echo "time_connect,time_appconnect,time_starttransfer,time_total" > "$OUTPUT_FILE"
 
