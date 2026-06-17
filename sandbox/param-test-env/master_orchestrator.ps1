@@ -68,6 +68,15 @@ server {
     Write-Host "Booting web-server environment..." -ForegroundColor Gray
     docker compose up -d web-server
     Start-Sleep -Seconds 2
+
+    Write-Host "Verifying Nginx status..." -ForegroundColor Gray
+    docker exec web-server nginx -t
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "Nginx config test failed! Checking logs:" -ForegroundColor Red
+        docker logs web-server
+        break # Stop the script to debug
+    }
+    
     docker exec -u 0 web-server apk add --no-cache iproute2-tc *>$null
 
     foreach ($latency in $LATENCIES) {
