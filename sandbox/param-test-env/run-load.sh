@@ -16,6 +16,15 @@ if [ ! -f "$OUTPUT_FILE" ] || [ ! -s "$OUTPUT_FILE" ]; then
   echo "kem,signature,latency,loss,time_connect_ms,time_tls_handshake_ms" > "$OUTPUT_FILE"
 fi
 
+for i in $(seq 1 1); do  # Just run once for debugging
+  echo "--- VERBOSE CURL OUTPUT ---"
+  
+  # Added -v for verbose output, and removed output redirection to see the error
+  curl --curves "$KEM_ALGO" -k -v https://web-server:443
+  
+  echo "----------------------------"
+done
+
 for i in $(seq 1 50); do
   # Use curl's -w to extract timing data natively. 
   # -k bypasses certificate domain verification since we used a self-signed cert.
