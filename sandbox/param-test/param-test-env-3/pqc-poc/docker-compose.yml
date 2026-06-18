@@ -4,8 +4,6 @@
 #  Usage: docker compose up --build
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-version: "3.9"
-
 networks:
   pqc-net:
     driver: bridge
@@ -37,13 +35,13 @@ services:
         reservations:
           cpus:   "0.25"
           memory: 64M
-    healthcheck:
-      # Use OQS openssl inside the container to verify TLS 1.3 + KEM group
-      test: ["CMD-SHELL", "openssl s_client -connect localhost:443 -tls1_3 -groups X25519_MLKEM768 -CAfile /certs/ca.crt </dev/null 2>&1 | grep -q 'Verify return code: 0'"]
-      interval:     10s
-      timeout:      5s
-      retries:      5
-      start_period: 8s
+    # healthcheck:
+    #   # Use OQS openssl inside the container to verify TLS 1.3 + KEM group
+    #   test: ["CMD-SHELL", "openssl s_client -connect localhost:443 -tls1_3 -groups X25519_MLKEM768 -CAfile /certs/ca.crt </dev/null 2>&1 | grep -q 'Verify return code: 0'"]
+    #   interval:     10s
+    #   timeout:      5s
+    #   retries:      5
+    #   start_period: 8s
     restart: on-failure
 
   # ── OQS-Locust: KD-protocol-aware load tester ────────────────────────
@@ -73,11 +71,9 @@ services:
         --locustfile /mnt/locust/locustfile.py
         --host https://oqs-nginx:443
         --web-port 8089
-      # Remove the next line to use the Web UI instead of headless mode:
-      # --headless --users 10 --spawn-rate 2 --run-time 120s
     depends_on:
       oqs-nginx:
-        condition: service_healthy
+        condition: service_started
     deploy:
       resources:
         limits:
