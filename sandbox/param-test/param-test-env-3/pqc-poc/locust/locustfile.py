@@ -122,7 +122,6 @@ class KDUser(HttpUser):
         with self.client.get(
             "/health",
             name="/health [probe]",
-            verify=False,
             catch_response=True
         ) as resp:
             if resp.status_code == 200:
@@ -135,7 +134,7 @@ class KDUser(HttpUser):
                     )
                 resp.success()
             else:
-                resp.failure(f"Unexpected status: {resp.status_code}")
+                resp.failure(f"HTTP {resp.status_code} | Err: {resp.error}")
 
         self.request_count += 1
         self._check_stop()
@@ -144,13 +143,12 @@ class KDUser(HttpUser):
         with self.client.get(
             path,
             name=name or path,
-            verify=False,
             catch_response=True
         ) as resp:
             if resp.status_code == 200:
                 resp.success()
             else:
-                resp.failure(f"HTTP {resp.status_code}")
+                resp.failure(f"HTTP {resp.status_code} | Err: {resp.error}")
 
         self.request_count += 1
         self._check_stop()
