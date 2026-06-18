@@ -42,27 +42,14 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 
 def build_oqs_ssl_context(kem_group: str) -> ssl.SSLContext:
-    """
-    Build an SSLContext that:
-    - Enforces TLS 1.3 only
-    - Requests the specified KEM group for key exchange
-    - Skips server cert verification (self-signed PoC CA)
-    """
+    # Create a bare-minimum client context
     ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
     ctx.minimum_version = ssl.TLSVersion.TLSv1_3
     ctx.maximum_version = ssl.TLSVersion.TLSv1_3
     ctx.check_hostname  = False
-    ctx.verify_mode     = ssl.CERT_NONE  # PoC only — use real CA in staging
-
-    # set_groups() is the correct Python 3.10+ API
-    # Falls back to set_ciphers for named group on older builds
-    try:
-        ctx.set_groups(kem_group)
-        log.info(f"SSLContext groups set to: {kem_group}")
-    except AttributeError:
-        # Older OQS Python binding — use OPENSSL_GROUPS env var (set above)
-        log.warning("set_groups() not available; relying on OPENSSL_GROUPS env var")
-
+    ctx.verify_mode     = ssl.CERT_NONE
+    
+    log.info("Basic SSLContext initialized. Relying on system environment variables for KEM.")
     return ctx
 
 
