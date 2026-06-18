@@ -78,13 +78,13 @@ Use the `openquantumsafe/oqs-ossl3` Docker image — it ships with OpenSSL 3 + O
 >
 > The `openquantumsafe/oqs-ossl3` image includes a full OQS OpenSSL build, but standard `prime256v1` (P-256) key generation works identically to native OpenSSL.
 
-> ⚠️ Run these commands from the **pqc-poc/** root directory. The `$(pwd)/certs` bind-mount writes files into your local `certs/` folder. On Windows PowerShell, replace `$(pwd)` with `${PWD}`.
+> ⚠️ Run these commands from the **pqc-poc/** root directory. The `${PWD}/certs` bind-mount writes files into your local `certs/` folder. On Windows PowerShell, replace `$(pwd)` with `${PWD}`.
 
 **`generate-certs.sh`**
 ```bash
 # ── Step 2a: Generate the CA private key using ECDSA P-256 ───────────────
 docker run --rm \
-  -v "$(pwd)/certs:/certs" \
+  -v "${PWD}/certs:/certs" \
   openquantumsafe/oqs-ossl3 \
   openssl genpkey \
     -algorithm EC \
@@ -93,7 +93,7 @@ docker run --rm \
 
 # ── Step 2b: Self-sign the CA certificate (10-year validity for PoC) ─────
 docker run --rm \
-  -v "$(pwd)/certs:/certs" \
+  -v "${PWD}/certs:/certs" \
   openquantumsafe/oqs-ossl3 \
   openssl req -new -x509 \
     -days 3650 \
@@ -103,7 +103,7 @@ docker run --rm \
 
 # ── Step 2c: Generate server private key (same classical algorithm) ───────
 docker run --rm \
-  -v "$(pwd)/certs:/certs" \
+  -v "${PWD}/certs:/certs" \
   openquantumsafe/oqs-ossl3 \
   openssl genpkey \
     -algorithm EC \
@@ -112,7 +112,7 @@ docker run --rm \
 
 # ── Step 2d: Create server CSR (CN must match the Docker service name) ───
 docker run --rm \
-  -v "$(pwd)/certs:/certs" \
+  -v "${PWD}/certs:/certs" \
   openquantumsafe/oqs-ossl3 \
   openssl req -new \
     -key  /certs/server.key \
@@ -121,7 +121,7 @@ docker run --rm \
 
 # ── Step 2e: Sign the server cert with the CA ────────────────────────────
 docker run --rm \
-  -v "$(pwd)/certs:/certs" \
+  -v "${PWD}/certs:/certs" \
   openquantumsafe/oqs-ossl3 \
   openssl x509 -req \
     -days    365 \
@@ -133,7 +133,7 @@ docker run --rm \
 
 # ── Step 2f: Verify the chain looks correct ───────────────────────────────
 docker run --rm \
-  -v "$(pwd)/certs:/certs" \
+  -v "${PWD}/certs:/certs" \
   openquantumsafe/oqs-ossl3 \
   openssl verify \
     -CAfile /certs/ca.crt \
@@ -634,7 +634,7 @@ The `/health` endpoint echoes the negotiated group: `OK ssl_curve=X25519_MLKEM76
 
 ```bash
 docker run --rm --network pqc-net \
-  -v "$(pwd)/certs:/certs" \
+  -v "${PWD}/certs:/certs" \
   openquantumsafe/oqs-ossl3 \
   openssl s_client \
     -connect   oqs-nginx:443 \
