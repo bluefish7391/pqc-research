@@ -26,7 +26,7 @@ services:
       - ./certs:/certs:ro
     environment:
       # Advertise all three protocol classes; server prefers left-to-right
-      - OPENSSL_GROUPS=X25519_MLKEM768:P384_MLKEM1024:mlkem768:X25519:P-256
+      - OPENSSL_GROUPS=X25519MLKEM768
     deploy:
       resources:
         limits:
@@ -59,8 +59,8 @@ services:
       - LOCUST_LOCUSTFILE=/mnt/locust/locustfile.py
       - LOCUST_HOST=https://oqs-nginx:443
       # ── KEM group under test — change this to switch protocol class ──
-      - OQS_KEM_GROUP=X25519_MLKEM768   # hybrid  | mlkem768 = pure-PQ | X25519 = classical
-      - OPENSSL_GROUPS=X25519_MLKEM768  # Belt-and-suspenders: env-level OQS hint
+      - OQS_KEM_GROUP=X25519MLKEM768   # hybrid  | mlkem768 = pure-PQ | X25519 = classical
+      - OPENSSL_GROUPS=X25519MLKEM768  # Belt-and-suspenders: env-level OQS hint
       # ── Traffic shape knobs (X, Y, Z) ────────────────────────────────
       - WAIT_MIN=1.0                    # Z low  — min seconds between requests
       - WAIT_MAX=3.0                    # Z high — max seconds between requests

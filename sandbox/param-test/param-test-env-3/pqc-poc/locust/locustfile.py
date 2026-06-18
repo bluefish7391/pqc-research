@@ -9,7 +9,7 @@ Configuration knobs (set via env vars or edit defaults below):
   WAIT_MIN      Z_low  — minimum seconds between requests  (default: 1.0)
   WAIT_MAX      Z_high — maximum seconds between requests  (default: 3.0)
   NUM_REQUESTS  Y      — stop after N requests per user   (default: 50)
-  OQS_KEM_GROUP        — TLS KEM group to negotiate       (default: X25519_MLKEM768)
+  OQS_KEM_GROUP        — TLS KEM group to negotiate       (default: X25519MLKEM768)
   TARGET_HOST          — HTTPS base URL of the server
 """
 
@@ -25,7 +25,7 @@ from locust.exception import StopUser
 WAIT_MIN      = float(os.getenv("WAIT_MIN",      "1.0"))
 WAIT_MAX      = float(os.getenv("WAIT_MAX",      "3.0"))
 NUM_REQUESTS  = int(os.getenv("NUM_REQUESTS",  "50"))
-KEM_GROUP     = os.getenv("OQS_KEM_GROUP",   "X25519_MLKEM768")
+KEM_GROUP     = os.getenv("OQS_KEM_GROUP",   "X25519MLKEM768")
 TARGET_HOST   = os.getenv("TARGET_HOST",     "https://oqs-nginx:443")
 
 # Belt-and-suspenders: also set the env var so the OQS OpenSSL picks it up
