@@ -19,7 +19,7 @@ services:
     networks:
       - pqc-net
     ports:
-      - "443:443"                    # Expose HTTPS to host for manual curl tests
+      - "443:4433"                    # Expose HTTPS to host for manual curl tests
     volumes:
       - ./nginx/nginx.conf:/opt/nginx/conf/nginx.conf:ro
       - ./nginx/index.html:/opt/nginx/html/index.html:ro
@@ -57,7 +57,7 @@ services:
     environment:
       # ── Locust core settings ─────────────────────────────────────────
       - LOCUST_LOCUSTFILE=/mnt/locust/locustfile.py
-      - LOCUST_HOST=https://oqs-nginx:443
+      - LOCUST_HOST=https://oqs-nginx:4433
       # ── KEM group under test — change this to switch protocol class ──
       - OQS_KEM_GROUP=X25519MLKEM768   # hybrid  | mlkem768 = pure-PQ | X25519 = classical
       - OPENSSL_GROUPS=X25519MLKEM768  # Belt-and-suspenders: env-level OQS hint
@@ -68,7 +68,7 @@ services:
     command: >
       locust
         --locustfile /mnt/locust/locustfile.py
-        --host https://oqs-nginx:443
+        --host https://oqs-nginx:4433
         --web-port 8089
     depends_on:
       oqs-nginx:
