@@ -21,7 +21,7 @@ services:
     ports:
       - "443:4433"                    # Expose HTTPS to host for manual curl tests
     volumes:
-      - ./nginx/nginx.conf:/opt/nginx/conf/nginx.conf:ro
+      - ./nginx/nginx.conf:/opt/nginx/nginx-conf/nginx.conf:ro
       - ./nginx/index.html:/opt/nginx/html/index.html:ro
       - ./certs:/certs:ro
     environment:
