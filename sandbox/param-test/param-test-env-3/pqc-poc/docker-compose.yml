@@ -55,14 +55,8 @@ services:
       - ./locust:/mnt/locust:ro
       - ./certs:/certs:ro            # Available for optional CA pinning
     environment:
-      # ── Locust core settings ─────────────────────────────────────────
       - LOCUST_LOCUSTFILE=/mnt/locust/locustfile.py
-      - LOCUST_HOST=https://oqs-nginx:4433
-      - TARGET_HOST=https://oqs-nginx:4433
-      # ── KEM group under test — change this to switch protocol class ──
-      - OQS_KEM_GROUP=X25519MLKEM768   # hybrid  | mlkem768 = pure-PQ | X25519 = classical
-      - OPENSSL_GROUPS=X25519MLKEM768  # Belt-and-suspenders: env-level OQS hint
-      - OQS_MAPPING=X25519:X25519MLKEM768
+      - OQS_KEM_GROUP=X25519MLKEM768
       # ── Traffic shape knobs (X, Y, Z) ────────────────────────────────
       - WAIT_MIN=1.0                    # Z low  — min seconds between requests
       - WAIT_MAX=3.0                    # Z high — max seconds between requests
