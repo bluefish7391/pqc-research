@@ -35,13 +35,12 @@ services:
         reservations:
           cpus:   "0.25"
           memory: 64M
-    # healthcheck:
-    #   # Use OQS openssl inside the container to verify TLS 1.3 + KEM group
-    #   test: ["CMD-SHELL", "openssl s_client -connect localhost:443 -tls1_3 -groups X25519_MLKEM768 -CAfile /certs/ca.crt </dev/null 2>&1 | grep -q 'Verify return code: 0'"]
-    #   interval:     10s
-    #   timeout:      5s
-    #   retries:      5
-    #   start_period: 8s
+    healthcheck:
+      test: ["CMD", "nginx", "-t"]
+      interval:     5s
+      timeout:      3s
+      retries:      3
+      start_period: 5s
     restart: on-failure
 
   # ── OQS-Locust: KD-protocol-aware load tester ────────────────────────
@@ -73,7 +72,7 @@ services:
         --web-port 8089
     depends_on:
       oqs-nginx:
-        condition: service_started
+        condition: service_healthy
     deploy:
       resources:
         limits:
