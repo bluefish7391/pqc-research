@@ -58,6 +58,7 @@ services:
       # ── Locust core settings ─────────────────────────────────────────
       - LOCUST_LOCUSTFILE=/mnt/locust/locustfile.py
       - LOCUST_HOST=https://oqs-nginx:4433
+      - TARGET_HOST=https://oqs-nginx:4433
       # ── KEM group under test — change this to switch protocol class ──
       - OQS_KEM_GROUP=X25519MLKEM768   # hybrid  | mlkem768 = pure-PQ | X25519 = classical
       - OPENSSL_GROUPS=X25519MLKEM768  # Belt-and-suspenders: env-level OQS hint

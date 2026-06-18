@@ -26,7 +26,7 @@ WAIT_MIN      = float(os.getenv("WAIT_MIN",      "1.0"))
 WAIT_MAX      = float(os.getenv("WAIT_MAX",      "3.0"))
 NUM_REQUESTS  = int(os.getenv("NUM_REQUESTS",  "50"))
 KEM_GROUP     = os.getenv("OQS_KEM_GROUP",   "X25519MLKEM768")
-TARGET_HOST   = os.getenv("TARGET_HOST",     "https://oqs-nginx:443")
+TARGET_HOST   = os.getenv("TARGET_HOST",     "https://oqs-nginx:4433")
 
 # Belt-and-suspenders: also set the env var so the OQS OpenSSL picks it up
 os.environ["OPENSSL_GROUPS"] = KEM_GROUP
