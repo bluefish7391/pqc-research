@@ -1,0 +1,29 @@
+services:
+  web-server:
+    image: openquantumsafe/nginx:latest
+    container_name: web-server
+    user: root  
+    ports:
+      - "8443:443"
+    volumes:
+      - type: bind
+        source: ./html
+        target: /usr/share/nginx/html
+      - type: bind
+        source: ./nginx.conf
+        target: /etc/nginx/conf.d/default.conf
+        read_only: true
+      - type: bind
+        source: ./ssl
+        target: /etc/nginx/ssl
+        read_only: true
+    cap_add:
+      - NET_ADMIN
+
+  load-tester:
+    image: openquantumsafe/curl:latest
+    volumes:
+      - type: bind
+        source: ./
+        target: /workspace
+    working_dir: /workspace

@@ -1,0 +1,75 @@
+
+networks:
+  pqc-net:
+    driver: bridge
+    name:   pqc-net
+
+services:
+
+  oqs-nginx:
+    image: openquantumsafe/nginx:latest
+    container_name: oqs-nginx
+    user: "0:0"
+    hostname:       oqs-nginx
+    networks:
+      - pqc-net
+    ports:
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/opt/nginx/nginx-conf/nginx.conf:ro
+      - ./nginx/index.html:/opt/nginx/html/index.html:ro
+      - ./certs:/certs:ro
+    environment:
+      - OPENSSL_CONF=/opt/nginx/ssl/openssl.cnf
+      - DEFAULT_GROUPS=X25519MLKEM768:SecP384r1MLKEM1024:mlkem768:x25519:prime256v1
+      - OPENSSL_GROUPS=X25519MLKEM768:SecP384r1MLKEM1024:mlkem768:x25519:prime256v1
+    deploy:
+      resources:
+        limits:
+          cpus:   "1.0"
+          memory: 256M
+        reservations:
+          cpus:   "0.25"
+          memory: 64M
+    healthcheck:
+      test: ["CMD-SHELL", "nginx -t && kill -0 $(cat /tmp/nginx.pid) 2>/dev/null"]
+      interval: 10s
+      timeout:  5s
+      retries:  5
+      start_period: 10s
+
+  oqs-locust:
+    image: openquantumsafe/locust:latest
+    container_name: oqs-locust
+    networks:
+      - pqc-net
+    ports:
+      - "8089:8089"
+    volumes:
+      - ./locust:/mnt/locust:ro
+      - ./certs:/certs:ro
+    environment:
+      - LOCUST_LOCUSTFILE=/mnt/locust/locustfile.py
+      - LOCUST_HOST=https://oqs-nginx:443
+      - OQS_KEM_GROUP=X25519MLKEM768
+      - OPENSSL_GROUPS=X25519MLKEM768
+      - WAIT_MIN=1.0
+      - WAIT_MAX=3.0
+      - NUM_REQUESTS=50
+    command: >
+      locust
+        --locustfile /mnt/locust/locustfile.py
+        --host https://oqs-nginx:443
+        --web-port 8089
+    depends_on:
+      oqs-nginx:
+        condition: service_started
+    deploy:
+      resources:
+        limits:
+          cpus:   "1.0"
+          memory: 512M
+        reservations:
+          cpus:   "0.25"
+          memory: 128M
+    restart: on-failure

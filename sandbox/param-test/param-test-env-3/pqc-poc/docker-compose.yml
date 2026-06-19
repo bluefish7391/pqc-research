@@ -1,0 +1,80 @@
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+#  KD Protocol Benchmarking PoC — Docker Compose
+#  Signature: ECDSA P-256 (classical) | KEM groups: classical / hybrid / pure-PQ
+#  Usage: docker compose up --build
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+networks:
+  pqc-net:
+    driver: bridge
+    name:   pqc-net
+
+services:
+
+  # ── OQS-Nginx: TLS 1.3 server with classical/hybrid/pure-PQ KEM groups ─
+  oqs-nginx:
+    image: openquantumsafe/nginx:latest
+    container_name: oqs-nginx
+    hostname:       oqs-nginx        # Must match CN in server.crt
+    networks:
+      - pqc-net
+    ports:
+      - "443:4433"                    # Expose HTTPS to host for manual curl tests
+    volumes:
+      - ./nginx/nginx.conf:/opt/nginx/nginx-conf/nginx.conf:ro
+      - ./nginx/index.html:/opt/nginx/html/index.html:ro
+      - ./certs:/certs:ro
+    environment:
+      # Advertise all three protocol classes; server prefers left-to-right
+      - OPENSSL_GROUPS=X25519MLKEM768
+    deploy:
+      resources:
+        limits:
+          cpus:   "1.0"             # Pin to 1 CPU core
+          memory: 256M
+        reservations:
+          cpus:   "0.25"
+          memory: 64M
+    healthcheck:
+      test: ["CMD", "nginx", "-t"]
+      interval:     5s
+      timeout:      3s
+      retries:      3
+      start_period: 5s
+    restart: on-failure
+
+  # ── OQS-Locust: KD-protocol-aware load tester ────────────────────────
+  oqs-locust:
+    image: openquantumsafe/locust:latest
+    container_name: oqs-locust
+    networks:
+      - pqc-net
+    ports:
+      - "8089:8089"                  # Locust Web UI
+    volumes:
+      - ./locust:/mnt/locust:ro
+      - ./certs:/certs:ro            # Available for optional CA pinning
+    environment:
+      - LOCUST_LOCUSTFILE=/mnt/locust/locustfile.py
+      - OQS_KEM_GROUP=X25519MLKEM768
+      # ── Traffic shape knobs (X, Y, Z) ────────────────────────────────
+      - WAIT_MIN=1.0                    # Z low  — min seconds between requests
+      - WAIT_MAX=3.0                    # Z high — max seconds between requests
+      - NUM_REQUESTS=50                 # Y      — requests per user before stop
+    command: >
+      locust
+        --locustfile /mnt/locust/locustfile.py
+        --host https://oqs-nginx:4433
+        --web-port 8089
+    depends_on:
+      oqs-nginx:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          cpus:   "1.0"
+          memory: 512M
+        reservations:
+          cpus:   "0.25"
+          memory: 128M
+    restart: on-failure

@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>KD Protocol PoC</title>
+</head>
+
+<body>
+    <h1>KD Protocol Benchmarking PoC — TLS 1.3 Endpoint</h1>
+    <p>If you see this page, the OQS-Nginx container is healthy and
+        serving content over a TLS 1.3 connection.</p>
+    <p>Configured KEM groups under test (in preference order):</p>
+    <ul>
+        <li>X25519_MLKEM768 (Hybrid — preferred)</li>
+        <li>P384_MLKEM1024 (Hybrid — high security)</li>
+        <li>mlkem768 (Pure Post-Quantum)</li>
+        <li>X25519 (Classical)</li>
+        <li>P-256 (Classical — broad compat)</li>
+    </ul>
+    <p><em>Cert signed with ECDSA P-256 (classical). KEM group is the benchmarked variable.</em></p>
+</body>
+
+</html>
