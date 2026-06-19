@@ -1,7 +1,10 @@
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-#  OQS-Nginx KD Protocol Benchmarking — TLS 1.3 Configuration
+#  OQS-Nginx KD Protocol Benchmarking — TLS 1.3 Configuration (TEMPLATE)
 #  Image: openquantumsafe/nginx:latest
-#  Signature: ECDSA P-256 (classical)  |  KEM: variable (see ssl_ecdh_curves)
+#  Signature: ECDSA P-256 (classical)  |  KEM: rendered by orchestrator
+#
+#  Do not edit nginx.conf directly — it is generated from this template.
+#  Placeholder __KEM_GROUP__ is substituted by run_matrix.sh before each run.
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 worker_processes  1;    # Match CPU limit in docker-compose
@@ -37,24 +40,20 @@ http {
         listen       4433 ssl;
         server_name  oqs-nginx;
 
-        # Certificate chain (ECDSA P-256 signed, generated in Step 2)
+        # Certificate chain (ECDSA P-256 signed) — held constant across
+        # all KEM groups intentionally; isolates KEM cost, not signature cost.
         ssl_certificate      /certs/server.crt;
         ssl_certificate_key  /certs/server.key;
 
         # ── TLS Protocol: strict TLS 1.3 only ───────────────────────────
         ssl_protocols  TLSv1.3;
 
-        # ── KEM Groups advertised to clients ────────────────────────────
-        #  Order of preference (left = most preferred):
-        #    1. X25519_MLKEM768    → HYBRID  (classical + PQ)     ★ default
-        #    2. P384_MLKEM1024     → HYBRID  (classical + PQ, higher sec)
-        #    3. mlkem768           → PURE PQ (no classical component)
-        #    4. X25519             → CLASSICAL
-        #    5. P-256              → CLASSICAL broad-compat
-        ssl_ecdh_curve  X25519MLKEM768;
-
-        # ── TLS 1.3 ciphersuites ────────────────────────────────────────
-        # ssl_ciphers  TLS_AES_256_GCM_SHA384:TLS_AES_128_GCM_SHA256:TLS_CHACHA20_POLY1305_SHA256;
+        # ── KEM Group advertised to clients — rendered per matrix run ───
+        #  Valid values used by run_matrix.sh:
+        #    classical : X25519
+        #    hybrid    : X25519MLKEM768
+        #    pure-pq   : MLKEM768
+        ssl_ecdh_curve  __KEM_GROUP__;
 
         # ── Session settings ────────────────────────────────────────────
         ssl_session_cache    shared:SSL:10m;
