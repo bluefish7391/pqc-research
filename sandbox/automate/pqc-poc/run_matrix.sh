@@ -28,15 +28,15 @@ export MSYS_NO_PATHCONV=1
 # vs draft names like kyber768). Edit the values below, not the labels.
 declare -A KEM_GROUPS=(
   [classical]="X25519"
-  [hybrid]="X25519MLKEM768"
+  # [hybrid]="X25519MLKEM768"
 )
 
-USER_LEVELS=(1 50)
+USER_LEVELS=(1)
 
 # Headless Locust run duration per combination (seconds).
 # This is now the ONLY stop condition — NUM_REQUESTS cap was removed
 # from locustfile.py, so runs no longer end early.
-DURATION="30s"
+DURATION="10s"
 
 # Spawn rate: how fast Locust ramps to the target user count.
 # Kept equal to user count so ramp-up is fast relative to DURATION;
@@ -47,7 +47,7 @@ SPAWN_RATE_FN() { echo "$1"; }
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 NGINX_TMPL="${PROJECT_DIR}/nginx/nginx.conf.tmpl"
 NGINX_CONF="${PROJECT_DIR}/nginx/nginx.conf"
-RESULTS_DIR="${PROJECT_DIR}/analysis/results"
+RESULTS_DIR="${PROJECT_DIR}/data/results"
 LOCUST_OUT_DIR="${PROJECT_DIR}/locust"   # locust --csv writes here (volume-mounted)
 
 mkdir -p "${RESULTS_DIR}"
