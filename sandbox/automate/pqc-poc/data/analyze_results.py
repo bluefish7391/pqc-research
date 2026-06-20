@@ -15,7 +15,7 @@ from the filename), and produces:
      what load was actually achieved, since this is a closed-loop client.
 
 Usage:
-    python3 analyze_results.py --results-dir ./../results --out-dir ./../figures
+    python3 analyze_results.py --results-dir results --out-dir figures
 
 Run_id parsing assumes filenames of the form:
     results_<kem_label>_u<users>_stats.csv

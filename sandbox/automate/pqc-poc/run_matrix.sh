@@ -47,7 +47,7 @@ SPAWN_RATE_FN() { echo "$1"; }
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 NGINX_TMPL="${PROJECT_DIR}/nginx/nginx.conf.tmpl"
 NGINX_CONF="${PROJECT_DIR}/nginx/nginx.conf"
-RESULTS_DIR="${PROJECT_DIR}/results"
+RESULTS_DIR="${PROJECT_DIR}/analysis/results"
 LOCUST_OUT_DIR="${PROJECT_DIR}/locust"   # locust --csv writes here (volume-mounted)
 
 mkdir -p "${RESULTS_DIR}"
