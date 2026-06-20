@@ -32,6 +32,8 @@ declare -A KEM_GROUPS=(
 )
 
 USER_LEVELS=(1)
+LATENCIES=("0ms")
+LOSS_LEVELS=("0%")
 
 # Headless Locust run duration per combination (seconds).
 # This is now the ONLY stop condition — NUM_REQUESTS cap was removed
@@ -94,12 +96,14 @@ run_one_combination() {
   local kem_label="$1"
   local kem_value="$2"
   local users="$3"
+  local latency_ms="$4"
+  local loss_pct="$5"
   local spawn_rate
   spawn_rate="$(SPAWN_RATE_FN "${users}")"
 
-  local run_id="${kem_label}_u${users}"
+  local run_id="${kem_label}_u${users}_lat${latency_ms}ms_loss${loss_pct}pct"
   log "════════════════════════════════════════════════════════════"
-  log "RUN: kem=${kem_label} (${kem_value})  users=${users}  duration=${DURATION}"
+  log "RUN: kem=${kem_label} (${kem_value})  users=${users}  latency=${latency_ms}  loss=${loss_pct}  duration=${DURATION}"
   log "════════════════════════════════════════════════════════════"
 
   render_nginx_conf "${kem_value}"
@@ -124,11 +128,8 @@ run_one_combination() {
   docker compose exec -T -u root oqs-locust sed -i 's/https:\/\//http:\/\//g' /etc/apk/repositories
   docker compose exec -T -u root oqs-locust apk add --no-cache iproute2
 
-  local LATENCY="50ms"
-  local PACKET_LOSS="2%"
-
-  log "Injecting network conditions: ${LATENCY} delay, ${PACKET_LOSS} loss..."
-  docker compose exec -T -u root oqs-locust tc qdisc add dev eth0 root netem delay "${LATENCY}" loss "${PACKET_LOSS}"
+  log "Injecting network conditions: ${latency_ms} delay, ${loss_pct} loss..."
+  docker compose exec -T -u root oqs-locust tc qdisc add dev eth0 root netem delay "${latency_ms}" loss "${loss_pct}"
 
   # Run Locust headless INSIDE the already-up container via docker compose run,
   # overriding the default `command` to pass headless flags explicitly.
@@ -174,7 +175,11 @@ main() {
   for kem_label in "${!KEM_GROUPS[@]}"; do
     kem_value="${KEM_GROUPS[${kem_label}]}"
     for users in "${USER_LEVELS[@]}"; do
-      run_one_combination "${kem_label}" "${kem_value}" "${users}"
+      for latency in "${LATENCIES[@]}"; do
+        for loss in "${LOSS_LEVELS[@]}"; do
+          run_one_combination "${kem_label}" "${kem_value}" "${users}" "${latency}" "${loss}"
+        done
+      done
     done
   done
 
