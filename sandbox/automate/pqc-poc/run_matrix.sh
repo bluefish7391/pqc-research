@@ -28,12 +28,12 @@ export MSYS_NO_PATHCONV=1
 # vs draft names like kyber768). Edit the values below, not the labels.
 declare -A KEM_GROUPS=(
   [classical]="X25519"
-  [hybrid]="X25519MLKEM768"
+  # [hybrid]="X25519MLKEM768"
 )
 
-USER_LEVELS=(1 50)
-LATENCIES=("0ms")
-LOSS_LEVELS=("0%")
+USER_LEVELS=(1)
+LATENCIES=(0 100)
+LOSS_LEVELS=(0)
 
 # Headless Locust run duration per combination (seconds).
 # This is now the ONLY stop condition — NUM_REQUESTS cap was removed
@@ -103,7 +103,7 @@ run_one_combination() {
 
   local run_id="${kem_label}_u${users}_lat${latency_ms}ms_loss${loss_pct}pct"
   log "════════════════════════════════════════════════════════════"
-  log "RUN: kem=${kem_label} (${kem_value})  users=${users}  latency=${latency_ms}  loss=${loss_pct}  duration=${DURATION}"
+  log "RUN: kem=${kem_label} (${kem_value})  users=${users}  latency=${latency_ms}ms  loss=${loss_pct}%  duration=${DURATION}"
   log "════════════════════════════════════════════════════════════"
 
   render_nginx_conf "${kem_value}"
@@ -128,8 +128,8 @@ run_one_combination() {
   docker compose exec -T -u root oqs-locust sed -i 's/https:\/\//http:\/\//g' /etc/apk/repositories
   docker compose exec -T -u root oqs-locust apk add --no-cache iproute2
 
-  log "Injecting network conditions: ${latency_ms} delay, ${loss_pct} loss..."
-  docker compose exec -T -u root oqs-locust tc qdisc add dev eth0 root netem delay "${latency_ms}" loss "${loss_pct}"
+  log "Injecting network conditions: ${latency_ms}ms delay, ${loss_pct}% loss..."
+  docker compose exec -T -u root oqs-locust tc qdisc add dev eth0 root netem delay "${latency_ms}ms" loss "${loss_pct}%"
 
   # Run Locust headless INSIDE the already-up container via docker compose run,
   # overriding the default `command` to pass headless flags explicitly.
