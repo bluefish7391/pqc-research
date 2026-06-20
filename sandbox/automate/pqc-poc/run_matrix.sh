@@ -129,6 +129,7 @@ run_one_combination() {
       --locustfile /mnt/locust/locustfile.py \
       --host https://oqs-nginx:4433 \
       --headless \
+      --only-summary \
       --users "${users}" \
       --spawn-rate "${spawn_rate}" \
       --run-time "${DURATION}" \
