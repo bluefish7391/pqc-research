@@ -28,17 +28,17 @@ export MSYS_NO_PATHCONV=1
 # vs draft names like kyber768). Edit the values below, not the labels.
 declare -A KEM_GROUPS=(
   [classical]="X25519"
-  # [hybrid]="X25519MLKEM768"
+  [hybrid]="X25519MLKEM768"
 )
 
-USER_LEVELS=(1)
+USER_LEVELS=(1 50)
 LATENCIES=("0ms")
 LOSS_LEVELS=("0%")
 
 # Headless Locust run duration per combination (seconds).
 # This is now the ONLY stop condition — NUM_REQUESTS cap was removed
 # from locustfile.py, so runs no longer end early.
-DURATION="10s"
+DURATION="30s"
 
 # Spawn rate: how fast Locust ramps to the target user count.
 # Kept equal to user count so ramp-up is fast relative to DURATION;
@@ -172,18 +172,25 @@ main() {
   # Ensure a clean slate before the sweep starts.
   teardown
 
+  local combinations_tested=0
+
   for kem_label in "${!KEM_GROUPS[@]}"; do
     kem_value="${KEM_GROUPS[${kem_label}]}"
     for users in "${USER_LEVELS[@]}"; do
       for latency in "${LATENCIES[@]}"; do
         for loss in "${LOSS_LEVELS[@]}"; do
           run_one_combination "${kem_label}" "${kem_value}" "${users}" "${latency}" "${loss}"
+          combinations_tested=$((combinations_tested + 1))
+
+          if [ $((combinations_tested % 10)) -eq 0 ]; then
+            clear
+          fi
         done
       done
     done
   done
 
-  log "Matrix sweep complete. Results in ${RESULTS_DIR}/"
+  log "Matrix sweep complete. Tested ${combinations_tested} combinations. Results in ${RESULTS_DIR}/"
 
   rm -f nginx/nginx.conf
 }
