@@ -1,5 +1,8 @@
-# Ignore certificates
+# Certificates
 certs/
 
-# Ignore results
+# Results
 results/
+
+# Locust pycache
+locust/__pycache__/
