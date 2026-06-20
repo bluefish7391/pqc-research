@@ -17,6 +17,8 @@
 
 set -euo pipefail
 
+export MSYS_NO_PATHCONV=1
+
 # ── Matrix definition ───────────────────────────────────────────────────
 # IMPORTANT: confirm these group strings match what your specific
 # openquantumsafe/nginx:latest build's OQS-OpenSSL provider expects.
@@ -86,7 +88,7 @@ wait_for_healthy() {
 
 teardown() {
   log "Tearing down (docker compose down -v)..."
-  docker compose -f "${PROJECT_DIR}/docker-compose.yml" down -v --remove-orphans || true
+  docker compose down -v --remove-orphans || true
 }
 
 run_one_combination() {
@@ -107,7 +109,7 @@ run_one_combination() {
   # OQS_KEM_GROUP must match kem_value or the handshake fails — export it
   # so docker compose's environment interpolation picks it up for oqs-locust.
   export OQS_KEM_GROUP="${kem_value}"
-  docker compose -f "${PROJECT_DIR}/docker-compose.yml" up -d --build oqs-nginx
+  docker compose up -d --build oqs-nginx
 
   if ! wait_for_healthy; then
     log "Skipping run ${run_id} due to unhealthy nginx."
@@ -116,14 +118,14 @@ run_one_combination() {
   fi
 
   # Bring up locust container too, now that nginx is confirmed healthy.
-  docker compose -f "${PROJECT_DIR}/docker-compose.yml" up -d --build oqs-locust
+  docker compose up -d --build oqs-locust
 
   # Run Locust headless INSIDE the already-up container via docker compose run,
   # overriding the default `command` to pass headless flags explicitly.
   # We run it as a one-off `exec` against the running container so the
   # service's environment (OQS_KEM_GROUP, etc.) is preserved.
   log "Starting headless Locust run..."
-  docker compose -f "${PROJECT_DIR}/docker-compose.yml" exec -T oqs-locust \
+  docker compose exec -T oqs-locust \
     locust \
       --locustfile /mnt/locust/locustfile.py \
       --host https://oqs-nginx:4433 \
@@ -154,6 +156,8 @@ main() {
   log "KEM groups: ${!KEM_GROUPS[*]}"
   log "User levels: ${USER_LEVELS[*]}"
   log "Duration per run: ${DURATION}"
+
+  cd "${PROJECT_DIR}"
 
   # Ensure a clean slate before the sweep starts.
   teardown
