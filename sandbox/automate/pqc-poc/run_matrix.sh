@@ -31,12 +31,12 @@ declare -A KEM_GROUPS=(
   [hybrid]="X25519MLKEM768"
 )
 
-USER_LEVELS=(1 10 25 50)
+USER_LEVELS=(1 50)
 
 # Headless Locust run duration per combination (seconds).
 # This is now the ONLY stop condition — NUM_REQUESTS cap was removed
 # from locustfile.py, so runs no longer end early.
-DURATION="60s"
+DURATION="30s"
 
 # Spawn rate: how fast Locust ramps to the target user count.
 # Kept equal to user count so ramp-up is fast relative to DURATION;
