@@ -118,6 +118,16 @@ run_one_combination() {
 
   # Bring up locust container too, now that nginx is confirmed healthy.
   docker compose up -d --build oqs-locust
+  sleep 2
+  
+  log "Installing iproute2 (tc) in oqs-locust..."
+  docker compose exec -T -u root oqs-locust apk add --no-cache iproute2
+
+  local LATENCY="50ms"
+  local PACKET_LOSS="2%"
+
+  log "Injecting network conditions: ${LATENCY} delay, ${PACKET_LOSS} loss..."
+  docker compose exec -T -u root oqs-locust tc qdisc add dev eth0 root netem delay "${LATENCY}" loss "${PACKET_LOSS}"
 
   # Run Locust headless INSIDE the already-up container via docker compose run,
   # overriding the default `command` to pass headless flags explicitly.

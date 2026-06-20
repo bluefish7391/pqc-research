@@ -60,6 +60,8 @@ services:
     volumes:
       - ./locust:/mnt/locust         # read-write: headless runs write --csv output here
       - ./certs:/certs:ro            # Available for optional CA pinning
+    cap_add:
+      - NET_ADMIN
     environment:
       # IMPORTANT: this must match nginx's ssl_ecdh_curve for the current
       # run, or the handshake fails (client/server must request the same
