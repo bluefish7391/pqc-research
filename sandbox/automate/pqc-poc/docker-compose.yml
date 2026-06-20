@@ -38,10 +38,10 @@ services:
           memory: 64M
     healthcheck:
       test: ["CMD", "nginx", "-t"]
-      interval:     5s
-      timeout:      3s
+      interval:     1s
+      timeout:      2s
       retries:      3
-      start_period: 5s
+      start_period: 3s
     restart: on-failure
 
   # ── OQS-Locust: KD-protocol-aware load tester ────────────────────────
