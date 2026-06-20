@@ -121,6 +121,7 @@ run_one_combination() {
   sleep 2
   
   log "Installing iproute2 (tc) in oqs-locust..."
+  docker compose exec -T -u root oqs-locust sed -i 's/https:\/\//http:\/\//g' /etc/apk/repositories
   docker compose exec -T -u root oqs-locust apk add --no-cache iproute2
 
   local LATENCY="50ms"
