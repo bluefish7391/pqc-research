@@ -27,9 +27,8 @@ export MSYS_NO_PATHCONV=1
 # Naming has varied across OQS-provider versions (e.g. mlkem768 vs MLKEM768
 # vs draft names like kyber768). Edit the values below, not the labels.
 declare -A KEM_GROUPS=(
-  [classical]="x25519"
+  [classical]="X25519"
   [hybrid]="X25519MLKEM768"
-  [pure-pq]="MLKEM768"
 )
 
 USER_LEVELS=(1 10 25 50)
@@ -137,11 +136,9 @@ run_one_combination() {
       --csv-full-history \
     || log "WARNING: locust exited non-zero for ${run_id} (check stats before discarding the run)"
 
-  # Copy result CSVs out of the bind-mounted locust dir into results/,
-  # tagged with the combination so the matrix sweep doesn't overwrite itself.
   if compgen -G "${LOCUST_OUT_DIR}/results_${run_id}*" > /dev/null; then
-    cp "${LOCUST_OUT_DIR}"/results_"${run_id}"* "${RESULTS_DIR}/"
-    log "Copied results_${run_id}* to ${RESULTS_DIR}/"
+    mv "${LOCUST_OUT_DIR}"/results_"${run_id}"* "${RESULTS_DIR}/"
+    log "Moved results_${run_id}* to ${RESULTS_DIR}/"
   else
     log "WARNING: no CSV output found for ${run_id} — check locust container logs."
   fi
