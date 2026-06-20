@@ -1,6 +1,6 @@
 main() {
-    rm -f ./results/*
-    rm -f ./figures/*
+    rm -rf ./results/*
+    rm -rf ./figures/*
 
     echo "Results and figures cleared."
 }
