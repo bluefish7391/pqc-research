@@ -179,6 +179,8 @@ main() {
   done
 
   log "Matrix sweep complete. Results in ${RESULTS_DIR}/"
+
+  rm -f nginx/nginx.conf
 }
 
 main "$@"
