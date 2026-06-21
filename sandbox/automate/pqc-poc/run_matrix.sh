@@ -28,12 +28,12 @@ export MSYS_NO_PATHCONV=1
 # vs draft names like kyber768). Edit the values below, not the labels.
 declare -A KEM_GROUPS=(
   [classical]="X25519"
-  # [hybrid]="X25519MLKEM768"
+  [hybrid]="X25519MLKEM768"
 )
 
-USER_LEVELS=(1)
+USER_LEVELS=(1 50)
 LATENCIES=(0 100)
-LOSS_LEVELS=(0)
+LOSS_LEVELS=(0 1)
 
 # Headless Locust run duration per combination (seconds).
 # This is now the ONLY stop condition — NUM_REQUESTS cap was removed
@@ -92,41 +92,46 @@ teardown() {
   docker compose down -v --remove-orphans || true
 }
 
+start_up_containers() {
+  local kem_label="$1"
+  local kem_value="$2"
+
+  log "Starting up containers for KEM group ${kem_label} (${kem_value})..."
+
+  export OQS_KEM_GROUP="${kem_value}"
+
+  render_nginx_conf "${kem_value}"
+  docker compose up -d --build oqs-nginx
+
+  if ! wait_for_healthy; then
+    log "ERROR: nginx did not become healthy for KEM group ${kem_label} (${kem_value})."
+    teardown
+    return 1
+  fi
+
+  docker compose up -d --build oqs-locust
+
+  log "Installing iproute2 (tc) in oqs-locust..."
+  docker compose exec -T -u root oqs-locust sed -i 's/https:\/\//http:\/\//g' /etc/apk/repositories
+  docker compose exec -T -u root oqs-locust apk add --no-cache iproute2
+  log "iproute2 (tc) installed in oqs-locust."
+}
+
 run_one_combination() {
   local kem_label="$1"
   local kem_value="$2"
   local users="$3"
   local latency_ms="$4"
   local loss_pct="$5"
-  local spawn_rate
-  spawn_rate="$(SPAWN_RATE_FN "${users}")"
+  local spawn_rate="$(SPAWN_RATE_FN "${users}")"
 
   local run_id="${kem_label}_u${users}_lat${latency_ms}ms_loss${loss_pct}pct"
   log "════════════════════════════════════════════════════════════"
   log "RUN: kem=${kem_label} (${kem_value})  users=${users}  latency=${latency_ms}ms  loss=${loss_pct}%  duration=${DURATION}"
   log "════════════════════════════════════════════════════════════"
 
-  render_nginx_conf "${kem_value}"
-
-  log "Bringing stack up (docker compose up -d --build)..."
-  # OQS_KEM_GROUP must match kem_value or the handshake fails — export it
-  # so docker compose's environment interpolation picks it up for oqs-locust.
-  export OQS_KEM_GROUP="${kem_value}"
-  docker compose up -d --build oqs-nginx
-
-  if ! wait_for_healthy; then
-    log "Skipping run ${run_id} due to unhealthy nginx."
-    teardown
-    return 1
-  fi
-
-  # Bring up locust container too, now that nginx is confirmed healthy.
-  docker compose up -d --build oqs-locust
-  sleep 2
-  
-  log "Installing iproute2 (tc) in oqs-locust..."
-  docker compose exec -T -u root oqs-locust sed -i 's/https:\/\//http:\/\//g' /etc/apk/repositories
-  docker compose exec -T -u root oqs-locust apk add --no-cache iproute2
+  log "Resetting network conditions..."
+  docker compose exec -T -u root oqs-locust tc qdisc del dev eth0 root netem || true
 
   log "Injecting network conditions: ${latency_ms}ms delay, ${loss_pct}% loss..."
   docker compose exec -T -u root oqs-locust tc qdisc add dev eth0 root netem delay "${latency_ms}ms" loss "${loss_pct}%"
@@ -155,8 +160,6 @@ run_one_combination() {
   else
     log "WARNING: no CSV output found for ${run_id} — check locust container logs."
   fi
-
-  teardown
 }
 
 # ── Main sweep ───────────────────────────────────────────────────────────
@@ -176,6 +179,8 @@ main() {
 
   for kem_label in "${!KEM_GROUPS[@]}"; do
     kem_value="${KEM_GROUPS[${kem_label}]}"
+    start_up_containers "${kem_label}" "${kem_value}"
+
     for users in "${USER_LEVELS[@]}"; do
       for latency in "${LATENCIES[@]}"; do
         for loss in "${LOSS_LEVELS[@]}"; do
@@ -188,6 +193,8 @@ main() {
         done
       done
     done
+
+    teardown
   done
 
   log "Matrix sweep complete. Tested ${combinations_tested} combinations. Results in ${RESULTS_DIR}/"
