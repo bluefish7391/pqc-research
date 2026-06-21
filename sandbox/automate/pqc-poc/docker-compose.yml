@@ -28,6 +28,7 @@ services:
       - ./nginx/nginx.conf:/opt/nginx/nginx-conf/nginx.conf:ro   # rendered file, not the .tmpl
       - ./nginx/index.html:/opt/nginx/html/index.html:ro
       - ./certs:/certs:ro
+    cpuset: "0"
     deploy:
       resources:
         limits:
@@ -75,6 +76,7 @@ services:
     depends_on:
       oqs-nginx:
         condition: service_healthy
+    cpuset: "1"
     deploy:
       resources:
         limits:
