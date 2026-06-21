@@ -1,0 +1,1 @@
+This folder is dedicated toward designing a automation script that will run through combinations of independent variables sequentially and report data collected.

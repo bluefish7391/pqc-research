@@ -1,0 +1,8 @@
+# Certificates
+certs/
+
+# Results and analysis
+results/
+figures/
+# Locust pycache
+locust/__pycache__/

@@ -1,0 +1,81 @@
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+#  OQS-Nginx KD Protocol Benchmarking — TLS 1.3 Configuration (TEMPLATE)
+#  Image: openquantumsafe/nginx:latest
+#  Signature: ECDSA P-256 (classical)  |  KEM: rendered by orchestrator
+#
+#  Do not edit nginx.conf directly — it is generated from this template.
+#  Placeholder __KEM_GROUP__ is substituted by run_matrix.sh before each run.
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+worker_processes  1;    # Match CPU limit in docker-compose
+error_log         /dev/stderr warn;
+pid               /opt/nginx/nginx.pid;
+
+events {
+    worker_connections 1024;
+    use                epoll;
+    multi_accept       on;
+}
+
+http {
+    include       /opt/nginx/conf/mime.types;
+    default_type  application/octet-stream;
+
+    # ── Logging: include $ssl_curve for handshake group visibility ──────
+    log_format kd_fmt '$remote_addr - [$time_local] "$request" '
+                      '$status $body_bytes_sent '
+                      'ssl_protocol=$ssl_protocol '
+                      'ssl_cipher=$ssl_cipher '
+                      'ssl_curve=$ssl_curve '        # <-- KEY FIELD
+                      'rt=$request_time';
+
+    access_log logs/access.log kd_fmt;
+
+    sendfile    on;
+    tcp_nopush  on;
+    keepalive_timeout  65;
+
+    # ── HTTPS Server Block ──────────────────────────────────────────────
+    server {
+        listen       4433 ssl;
+        server_name  oqs-nginx;
+
+        # Certificate chain (ECDSA P-256 signed) — held constant across
+        # all KEM groups intentionally; isolates KEM cost, not signature cost.
+        ssl_certificate      /certs/server.crt;
+        ssl_certificate_key  /certs/server.key;
+
+        # ── TLS Protocol: strict TLS 1.3 only ───────────────────────────
+        ssl_protocols  TLSv1.3;
+
+        # ── KEM Group advertised to clients — rendered per matrix run ───
+        #  Valid values used by run_matrix.sh:
+        #    classical : X25519
+        #    hybrid    : X25519MLKEM768
+        #    pure-pq   : MLKEM768
+        ssl_ecdh_curve  __KEM_GROUP__;
+
+        # ── Session settings ────────────────────────────────────────────
+        ssl_session_cache    shared:SSL:10m;
+        ssl_session_timeout  10m;
+        ssl_session_tickets  off;  # Disable for consistent full handshakes
+
+        # ── HSTS (informational for PoC) ────────────────────────────────
+        add_header Strict-Transport-Security "max-age=300" always;
+        add_header X-KD-Group               "$ssl_curve" always;
+
+        # ── Static content ──────────────────────────────────────────────
+        root   /opt/nginx/html;
+        index  index.html;
+
+        location / {
+            try_files $uri $uri/ =404;
+        }
+
+        # ── Health check endpoint ───────────────────────────────────────
+        location /health {
+            return 200 "OK ssl_curve=$ssl_curve\n";
+            add_header Content-Type text/plain;
+        }
+    }
+}

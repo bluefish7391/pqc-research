@@ -1,0 +1,88 @@
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+#  KD Protocol Benchmarking PoC — Docker Compose
+#  Signature: ECDSA P-256 (classical) | KEM groups: classical / hybrid / pure-PQ
+#  KEM group is selected by run_matrix.sh, which renders nginx/nginx.conf
+#  from nginx/nginx.conf.tmpl before each `docker compose up`.
+#
+#  Usage: ./run_matrix.sh   (do not `docker compose up` directly for sweeps —
+#  nginx.conf will not reflect the intended KEM group unless rendered first)
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+networks:
+  pqc-net:
+    driver: bridge
+    name:   pqc-net
+
+services:
+
+  # ── OQS-Nginx: TLS 1.3 server, KEM group set via rendered nginx.conf ──
+  oqs-nginx:
+    image: openquantumsafe/nginx:latest
+    container_name: oqs-nginx
+    hostname:       oqs-nginx        # Must match CN in server.crt
+    networks:
+      - pqc-net
+    ports:
+      - "443:4433"                    # Expose HTTPS to host for manual curl tests
+    volumes:
+      - ./nginx/nginx.conf:/opt/nginx/nginx-conf/nginx.conf:ro   # rendered file, not the .tmpl
+      - ./nginx/index.html:/opt/nginx/html/index.html:ro
+      - ./certs:/certs:ro
+    cpuset: "0"
+    deploy:
+      resources:
+        limits:
+          cpus:   "1.0"             # Pin to 1 CPU core
+          memory: 256M
+        reservations:
+          cpus:   "0.25"
+          memory: 64M
+    healthcheck:
+      test: ["CMD", "nginx", "-t"]
+      interval:     1s
+      timeout:      2s
+      retries:      3
+      start_period: 3s
+    restart: on-failure
+
+  # ── OQS-Locust: KD-protocol-aware load tester ────────────────────────
+  #  No `command:` override here — run_matrix.sh starts this container
+  #  idling (locust with no run flags exits immediately if a command runs
+  #  to completion, so we override the entrypoint to keep it alive) and
+  #  then triggers headless runs via `docker compose exec`, one per
+  #  KEM-group/user-count combination in the sweep.
+  oqs-locust:
+    image: openquantumsafe/locust:latest
+    container_name: oqs-locust
+    networks:
+      - pqc-net
+    ports:
+      - "8089:8089"                  # Unused in headless sweeps; left open for manual debugging
+    volumes:
+      - ./locust:/mnt/locust         # read-write: headless runs write --csv output here
+      - ./certs:/certs:ro            # Available for optional CA pinning
+    cap_add:
+      - NET_ADMIN
+    environment:
+      # IMPORTANT: this must match nginx's ssl_ecdh_curve for the current
+      # run, or the handshake fails (client/server must request the same
+      # group). run_matrix.sh sets this to the matching value before
+      # `docker compose up` for each combination — do not leave it static.
+      - OQS_KEM_GROUP=${OQS_KEM_GROUP:-X25519MLKEM768}
+      # ── Traffic shape knobs ──────────────────────────────────────────
+      - WAIT_MIN=1.0                    # min seconds between requests per user
+      - WAIT_MAX=3.0                    # max seconds between requests per user
+    entrypoint: ["sleep", "infinity"]   # keep container alive; run_matrix.sh execs locust into it
+    depends_on:
+      oqs-nginx:
+        condition: service_healthy
+    cpuset: "1"
+    deploy:
+      resources:
+        limits:
+          cpus:   "1.0"
+          memory: 512M
+        reservations:
+          cpus:   "0.25"
+          memory: 128M
+    restart: on-failure
