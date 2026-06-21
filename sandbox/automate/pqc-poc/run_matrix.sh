@@ -136,8 +136,8 @@ run_one_combination() {
   log "Injecting network conditions: ${latency_ms}ms delay, ${loss_pct}% loss..."
   docker compose exec -T -u root oqs-locust tc qdisc add dev eth0 root netem delay "${latency_ms}ms" loss "${loss_pct}%"
 
-  local cpu_log_file="${RESULTS_DIR}/cpu_client_${run_id}.csv"
-  echo "timestamp,cpu,mem" >> "${cpu_log_file}"
+  local cpu_log_file="${RESULTS_DIR}/cpu_matrix_${run_id}.csv"
+  echo "Timestamp,Container,CPU_Pct,Mem_Usage" > "${cpu_log_file}"
 
   log "Spawning background monitor (waiting for locust to spin up)..."
   (
@@ -146,29 +146,30 @@ run_one_combination() {
       sleep 0.2
     done
 
-    log "Locust detected! Active data collection started."
+    log "Locust detected! Active client & server data collection started."
 
-    # 2. Stream stats directly to the loop (no intermediate pipes to trigger buffering)
-    docker stats --format "{{.CPUPerc}},{{.MemUsage}}" oqs-locust | while read -r raw_stats; do
+    # 2. Stream stats for BOTH containers at once. 
+    # Adding {{.Name}} allows us to see which row belongs to which container.
+    docker stats --format "{{.Name}},{{.CPUPerc}},{{.MemUsage}}" oqs-locust oqs-nginx | while read -r raw_stats; do
       
       # Fast safety check: Stop logging if locust has exited
       if ! docker top oqs-locust 2>/dev/null | grep -E "locust" >/dev/null 2>&1; then
         break
       fi
 
-      # Bash String Manipulation: Strip out the specific ANSI codes (^[H and ^[K)
-      # This removes the escape character (\x1b) and accompanying terminal commands
+      # Clean the invisible ANSI cursor codes out of the stream
       clean_stats=$(echo "${raw_stats}" | sed 's/'"$(printf '\033')"'\[[0-9;]*[a-zA-Z]//g')
 
+      # Skip empty cursor-reset lines
       if [ -z "${clean_stats}" ]; then
         continue
       fi
 
-      # Log data instantly with the host timestamp
+      # Log data instantly with a host timestamp
       echo "$(date '+%Y-%m-%d %H:%M:%S'),${clean_stats}" >> "${cpu_log_file}"
     done
 
-    log "Locust process stopped. Data collection closed."
+    log "Benchmark finished. Resource collection closed."
   ) &
 
   # Run Locust headless INSIDE the already-up container via docker compose run,
