@@ -28,12 +28,12 @@ export MSYS_NO_PATHCONV=1
 # vs draft names like kyber768). Edit the values below, not the labels.
 declare -A KEM_GROUPS=(
   [classical]="X25519"
-  [hybrid]="X25519MLKEM768"
+  # [hybrid]="X25519MLKEM768"
 )
 
-USER_LEVELS=(1 50)
-LATENCIES=(0 100)
-LOSS_LEVELS=(0 1)
+USER_LEVELS=(1)
+LATENCIES=(0)
+LOSS_LEVELS=(0)
 
 # Headless Locust run duration per combination (seconds).
 # This is now the ONLY stop condition — NUM_REQUESTS cap was removed
@@ -136,6 +136,33 @@ run_one_combination() {
   log "Injecting network conditions: ${latency_ms}ms delay, ${loss_pct}% loss..."
   docker compose exec -T -u root oqs-locust tc qdisc add dev eth0 root netem delay "${latency_ms}ms" loss "${loss_pct}%"
 
+  local cpu_log_file="${RESULTS_DIR}/cpu_client_${run_id}.csv"
+
+  log "Spawning background monitor (waiting for locust to spin up)..."
+  (
+    # 1. Block and wait until the 'locust' process appears inside the container
+    until docker top oqs-locust 2>/dev/null | grep -E "locust" >/dev/null 2>&1; do
+      sleep 0.2
+    done
+
+    log "Locust detected! Active data collection started."
+
+    # 2. Stream docker stats directly. The loop triggers instantly whenever docker emits a line.
+    docker stats --format "{{.CPUPerc}},{{.MemUsage}}" oqs-locust | while read -r stats; do
+      
+      # Fast safety check: Stop logging if locust has exited
+      if ! docker top oqs-locust 2>/dev/null | grep -E "locust" >/dev/null 2>&1; then
+        break
+      fi
+
+      # Log data instantly with the host timestamp
+      echo "$(date '+%Y-%m-%d %H:%M:%S'),${stats}" >> "${cpu_log_file}"
+    done
+
+    log "Locust process stopped. Data collection closed."
+  ) &
+  # ──────────────────────────────────────────────────
+
   # Run Locust headless INSIDE the already-up container via docker compose run,
   # overriding the default `command` to pass headless flags explicitly.
   # We run it as a one-off `exec` against the running container so the
@@ -187,7 +214,7 @@ main() {
           run_one_combination "${kem_label}" "${kem_value}" "${users}" "${latency}" "${loss}"
           combinations_tested=$((combinations_tested + 1))
 
-          if [ $((combinations_tested % 10)) -eq 0 ]; then
+          if [ $((combinations_tested % 3)) -eq 0 ]; then
             clear
           fi
         done
