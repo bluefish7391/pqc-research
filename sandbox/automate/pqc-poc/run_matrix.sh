@@ -31,14 +31,14 @@ declare -A KEM_GROUPS=(
   [hybrid]="X25519MLKEM768"
 )
 
-USER_LEVELS=(1)
+USER_LEVELS=(1 10)
 LATENCIES=(0)
-LOSS_LEVELS=(0)
+LOSS_LEVELS=(0 1)
 
 # Headless Locust run duration per combination (seconds).
 # This is now the ONLY stop condition — NUM_REQUESTS cap was removed
 # from locustfile.py, so runs no longer end early.
-DURATION="10s"
+DURATION="60s"
 
 # Spawn rate: how fast Locust ramps to the target user count.
 # Kept equal to user count so ramp-up is fast relative to DURATION;
@@ -53,12 +53,12 @@ RESULTS_DIR="${PROJECT_DIR}/data/results"
 LOCUST_OUT_DIR="${PROJECT_DIR}/locust"
 PCAP_DIR="${PROJECT_DIR}/data/pcap"
 
-mkdir -p "${RESULTS_DIR}"
-
 # ── Helpers ──────────────────────────────────────────────────────────────
 
 log() {
-  echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*"
+  local timestamped_message="[$(date '+%Y-%m-%d %H:%M:%S')] $*"
+  echo "${timestamped_message}"
+  echo "${timestamped_message}" >> "${PROJECT_DIR}/logs/run_matrix.log"
 }
 
 render_nginx_conf() {
