@@ -4,5 +4,8 @@ certs/
 # Results and analysis
 results/
 figures/
-# Locust pycache
+pcap/
+
+# Generated files
 locust/__pycache__/
+locust/nginx.conf

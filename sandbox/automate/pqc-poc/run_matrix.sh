@@ -50,7 +50,8 @@ PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 NGINX_TMPL="${PROJECT_DIR}/nginx/nginx.conf.tmpl"
 NGINX_CONF="${PROJECT_DIR}/nginx/nginx.conf"
 RESULTS_DIR="${PROJECT_DIR}/data/results"
-LOCUST_OUT_DIR="${PROJECT_DIR}/locust"   # locust --csv writes here (volume-mounted)
+LOCUST_OUT_DIR="${PROJECT_DIR}/locust"
+PCAP_DIR="${PROJECT_DIR}/data/pcap"
 
 mkdir -p "${RESULTS_DIR}"
 
