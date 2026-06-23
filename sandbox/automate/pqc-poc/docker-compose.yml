@@ -61,7 +61,7 @@ services:
     volumes:
       - ./locust:/mnt/locust         # read-write: headless runs write --csv output here
       - ./certs:/certs:ro            # Available for optional CA pinning
-      - ./data/pcap:/mnt/pcap        # read-write: tcpdump writes pcap files here
+      - ./data/pcaps:/mnt/pcaps        # read-write: tcpdump writes pcap files here
     cap_add:
       - NET_ADMIN
     environment:
