@@ -33,12 +33,14 @@ declare -A KEM_GROUPS=(
 
 USER_LEVELS=(1 10)
 LATENCIES=(0)
-LOSS_LEVELS=(0 1)
+LOSS_LEVELS=(0 10)
 
 # Headless Locust run duration per combination (seconds).
 # This is now the ONLY stop condition — NUM_REQUESTS cap was removed
 # from locustfile.py, so runs no longer end early.
 DURATION="60s"
+
+REPETITIONS_PER_TEST=1
 
 # Spawn rate: how fast Locust ramps to the target user count.
 # Kept equal to user count so ramp-up is fast relative to DURATION;
@@ -122,11 +124,13 @@ run_one_combination() {
   local users="$3"
   local latency_ms="$4"
   local loss_pct="$5"
+  local repetition="$6"
+  local trial_number="$7"
   local spawn_rate="$(SPAWN_RATE_FN "${users}")"
 
-  local run_id="${kem_label}_u${users}_lat${latency_ms}ms_loss${loss_pct}pct"
+  local run_id="${kem_label}_u${users}_lat${latency_ms}ms_loss${loss_pct}pct_rep${repetition}"
   log "════════════════════════════════════════════════════════════"
-  log "RUN: kem=${kem_label} (${kem_value})  users=${users}  latency=${latency_ms}ms  loss=${loss_pct}%  duration=${DURATION}"
+  log "RUN(${trial_number}/${total_trials}): kem=${kem_label} (${kem_value})  users=${users}  latency=${latency_ms}ms  loss=${loss_pct}%  duration=${DURATION}"
   log "════════════════════════════════════════════════════════════"
 
   log "Resetting network conditions..."
@@ -237,7 +241,9 @@ main() {
   # Ensure a clean slate before the sweep starts.
   teardown
 
-  local combinations_tested=0
+  local total_combinations=$(( ${#KEM_GROUPS[@]} * ${#USER_LEVELS[@]} * ${#LATENCIES[@]} * ${#LOSS_LEVELS[@]} ))
+  local total_trials_performed=0
+  total_trials=$(( total_combinations * REPETITIONS_PER_TEST ))
 
   for kem_label in "${!KEM_GROUPS[@]}"; do
     kem_value="${KEM_GROUPS[${kem_label}]}"
@@ -246,12 +252,14 @@ main() {
     for users in "${USER_LEVELS[@]}"; do
       for latency in "${LATENCIES[@]}"; do
         for loss in "${LOSS_LEVELS[@]}"; do
-          run_one_combination "${kem_label}" "${kem_value}" "${users}" "${latency}" "${loss}"
-          combinations_tested=$((combinations_tested + 1))
+          for ((rep=1; rep<=REPETITIONS_PER_TEST; rep++)); do
+            run_one_combination "${kem_label}" "${kem_value}" "${users}" "${latency}" "${loss}" "${rep}" "$((total_trials_performed + 1))"
+            total_trials_performed=$((total_trials_performed + 1))
 
-          if [ $((combinations_tested % 3)) -eq 0 ]; then
-            clear
-          fi
+            if [ $((total_trials_performed % 3)) -eq 0 ]; then
+              clear
+            fi
+          done
         done
       done
     done
@@ -259,7 +267,7 @@ main() {
     teardown
   done
 
-  log "Matrix sweep complete. Tested ${combinations_tested} combinations. Results in ${RESULTS_DIR}/"
+  log "Matrix sweep complete. Results in ${RESULTS_DIR}/"
 
   rm -f nginx/nginx.conf
 }
