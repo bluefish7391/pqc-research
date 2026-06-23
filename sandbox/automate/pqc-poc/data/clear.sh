@@ -1,8 +1,9 @@
 main() {
+    rm -rf ./pcaps/*
     rm -rf ./results/*
     rm -rf ./figures/*
 
-    echo "Results and figures cleared."
+    echo "Data cleared."
 }
 
 main "$@"
