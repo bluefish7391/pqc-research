@@ -28,7 +28,7 @@ export MSYS_NO_PATHCONV=1
 # vs draft names like kyber768). Edit the values below, not the labels.
 declare -A KEM_GROUPS=(
   [classical]="X25519"
-  # [hybrid]="X25519MLKEM768"
+  [hybrid]="X25519MLKEM768"
 )
 
 USER_LEVELS=(1)
@@ -177,6 +177,7 @@ run_one_combination() {
 
     log "Benchmark finished. Resource collection closed."
   ) &
+  CPU_MONITOR_PID=$!
 
   # Run Locust headless INSIDE the already-up container via docker compose run,
   # overriding the default `command` to pass headless flags explicitly.
@@ -196,7 +197,10 @@ run_one_combination() {
       --csv-full-history \
     || log "WARNING: locust exited non-zero for ${run_id} (check stats before discarding the run)"
 
-  kill $TSHARK_PID 2>/dev/null || true
+  kill $CPU_MONITOR_PID 2>/dev/null || true
+  wait $CPU_MONITOR_PID 2>/dev/null || true
+
+  docker compose exec -T -u root oqs-locust pkill -SIGINT tshark 2>/dev/null || true
   wait $TSHARK_PID 2>/dev/null || true
 
   extract_pcap_metrics "${run_id}"
