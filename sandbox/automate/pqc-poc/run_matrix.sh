@@ -38,7 +38,7 @@ LOSS_LEVELS=(0)
 # Headless Locust run duration per combination (seconds).
 # This is now the ONLY stop condition — NUM_REQUESTS cap was removed
 # from locustfile.py, so runs no longer end early.
-DURATION="30s"
+DURATION="10s"
 
 # Spawn rate: how fast Locust ramps to the target user count.
 # Kept equal to user count so ramp-up is fast relative to DURATION;
@@ -111,10 +111,8 @@ start_up_containers() {
 
   docker compose up -d --build oqs-locust
 
-  log "Installing iproute2 (tc) in oqs-locust..."
   docker compose exec -T -u root oqs-locust sed -i 's/https:\/\//http:\/\//g' /etc/apk/repositories
-  docker compose exec -T -u root oqs-locust apk add --no-cache iproute2
-  log "iproute2 (tc) installed in oqs-locust."
+  docker compose exec -T -u root oqs-locust apk add --no-cache iproute2 tshark
 }
 
 run_one_combination() {
