@@ -135,6 +135,15 @@ run_one_combination() {
   log "Injecting network conditions: ${latency_ms}ms delay, ${loss_pct}% loss..."
   docker compose exec -T -u root oqs-locust tc qdisc add dev eth0 root netem delay "${latency_ms}ms" loss "${loss_pct}%"
 
+  docker compose exec -T -u root oqs-locust \
+    tshark \
+      -i eth0 \
+      -f "host oqs-nginx and tcp port 4433" \
+      -w "/mnt/pcaps/${run_id}.pcap" \
+    &
+  TSHARK_PID=$!
+  sleep 1
+
   local cpu_log_file="${RESULTS_DIR}/cpu_matrix_${run_id}.csv"
   echo "Timestamp,Container,CPU_Pct,Mem_Usage,Net_IO_Rx_Tx" > "${cpu_log_file}"
 
@@ -187,12 +196,28 @@ run_one_combination() {
       --csv-full-history \
     || log "WARNING: locust exited non-zero for ${run_id} (check stats before discarding the run)"
 
+  kill $TSHARK_PID 2>/dev/null || true
+  wait $TSHARK_PID 2>/dev/null || true
+
+  extract_pcap_metrics "${run_id}"
+
   if compgen -G "${LOCUST_OUT_DIR}/results_${run_id}*" > /dev/null; then
     mv "${LOCUST_OUT_DIR}"/results_"${run_id}"* "${RESULTS_DIR}/"
     log "Moved results_${run_id}* to ${RESULTS_DIR}/"
   else
     log "WARNING: no CSV output found for ${run_id} — check locust container logs."
   fi
+}
+
+extract_pcap_metrics() {
+  local run_id="$1"
+  local pcap="/mnt/pcaps/${run_id}.pcap"
+  local out="${RESULTS_DIR}/pcap_summary_${run_id}.csv"
+
+  docker compose exec -T oqs-locust \
+    tshark -r "${pcap}" -q \
+      -z "io,stat,0,tcp.len,tcp.analysis.retransmission" \
+    > "${out}" 2>&1 || log "WARNING: tshark summary failed for ${run_id}"
 }
 
 # ── Main sweep ───────────────────────────────────────────────────────────
