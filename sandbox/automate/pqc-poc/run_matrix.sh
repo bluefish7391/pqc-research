@@ -53,7 +53,7 @@ NGINX_TMPL="${PROJECT_DIR}/nginx/nginx.conf.tmpl"
 NGINX_CONF="${PROJECT_DIR}/nginx/nginx.conf"
 RESULTS_DIR="${PROJECT_DIR}/data/results"
 LOCUST_OUT_DIR="${PROJECT_DIR}/locust"
-PCAP_DIR="${PROJECT_DIR}/data/pcap"
+PCAP_DIR="${PROJECT_DIR}/data/pcaps"
 
 mkdir -p "${RESULTS_DIR}" "${PCAP_DIR}" "${PROJECT_DIR}/logs"
 touch "${PROJECT_DIR}/logs/run_matrix.log"
