@@ -28,12 +28,12 @@ export MSYS_NO_PATHCONV=1
 # vs draft names like kyber768). Edit the values below, not the labels.
 declare -A KEM_GROUPS=(
   [classical]="X25519"
-  [hybrid]="X25519MLKEM768"
+  # [hybrid]="X25519MLKEM768"
 )
 
-USER_LEVELS=(1 10)
+USER_LEVELS=(10)
 LATENCIES=(0)
-LOSS_LEVELS=(0 10)
+LOSS_LEVELS=(10)
 
 # Headless Locust run duration per combination (seconds).
 # This is now the ONLY stop condition — NUM_REQUESTS cap was removed
@@ -54,6 +54,9 @@ NGINX_CONF="${PROJECT_DIR}/nginx/nginx.conf"
 RESULTS_DIR="${PROJECT_DIR}/data/results"
 LOCUST_OUT_DIR="${PROJECT_DIR}/locust"
 PCAP_DIR="${PROJECT_DIR}/data/pcap"
+
+mkdir -p "${RESULTS_DIR}" "${PCAP_DIR}" "${PROJECT_DIR}/logs"
+touch "${PROJECT_DIR}/logs/run_matrix.log"
 
 # ── Helpers ──────────────────────────────────────────────────────────────
 
@@ -264,7 +267,6 @@ main() {
       done
     done
 
-    teardown
   done
 
   log "Matrix sweep complete. Results in ${RESULTS_DIR}/"
