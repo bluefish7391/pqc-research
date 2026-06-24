@@ -4,8 +4,6 @@ import time
 import logging
 from locust import User, task, between, events
 
-WAIT_MIN   = float(os.getenv("WAIT_MIN", "1.0"))
-WAIT_MAX   = float(os.getenv("WAIT_MAX", "3.0"))
 KEM_GROUP  = os.getenv("OQS_KEM_GROUP", "X25519MLKEM768")
 
 logging.basicConfig(level=logging.INFO)
@@ -13,7 +11,7 @@ log = logging.getLogger("oqs-bridge")
 
 
 class OQSSubprocessUser(User):
-    wait_time = between(WAIT_MIN, WAIT_MAX)
+    wait_time = between(0.0, 0.0)
 
     @task
     def run_oqs_request(self):
