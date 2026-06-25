@@ -1,4 +1,5 @@
 import os
+import shutil
 import subprocess
 import time
 import logging
@@ -6,8 +7,38 @@ from locust import User, task, between, events
 
 KEM_GROUP  = os.getenv("OQS_KEM_GROUP", "X25519MLKEM768")
 
+
+def resolve_openssl_bin() -> str:
+    env_bin = os.getenv("OQS_OPENSSL_BIN", "").strip()
+    candidates = [
+        env_bin,
+        "openssl",
+        "/opt/oqssa/bin/openssl",
+        "/opt/openssl/apps/openssl",
+    ]
+
+    for candidate in candidates:
+        if not candidate:
+            continue
+        if os.path.isabs(candidate):
+            if os.path.exists(candidate) and os.access(candidate, os.X_OK):
+                return candidate
+        else:
+            resolved = shutil.which(candidate)
+            if resolved:
+                return resolved
+
+    return ""
+
+
+OPENSSL_BIN = resolve_openssl_bin()
+
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("oqs-bridge")
+if OPENSSL_BIN:
+    log.info("Using OpenSSL client binary: %s", OPENSSL_BIN)
+else:
+    log.error("No OpenSSL client binary found. Checked OQS_OPENSSL_BIN, PATH openssl, /opt/oqssa/bin/openssl, /opt/openssl/apps/openssl")
 
 
 class OQSSubprocessUser(User):
@@ -17,9 +48,20 @@ class OQSSubprocessUser(User):
     def run_oqs_request(self):
         start_time = time.time()
 
+        if not OPENSSL_BIN:
+            total_time = int((time.time() - start_time) * 1000)
+            events.request.fire(
+                request_type="OQS-TLS",
+                name=f"GET / [{KEM_GROUP}]",
+                response_time=total_time,
+                response_length=0,
+                exception=Exception("No OpenSSL client binary available in locust container"),
+            )
+            return
+
         # Build the exact command that openssl s_client needs to hit Nginx.
         cmd = [
-            "openssl", "s_client",
+            OPENSSL_BIN, "s_client",
             "-connect", "oqs-nginx:4433",
             "-groups", KEM_GROUP,
             "-quiet",

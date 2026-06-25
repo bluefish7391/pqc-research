@@ -28,12 +28,12 @@ export MSYS_NO_PATHCONV=1
 # vs draft names like kyber768). Edit the values below, not the labels.
 declare -A KEM_GROUPS=(
   [classical]="X25519"
-  # [hybrid]="X25519MLKEM768"
+  [hybrid]="X25519MLKEM768"
 )
 
-USER_LEVELS=(10)
+USER_LEVELS=(20)
 LATENCIES=(0)
-LOSS_LEVELS=(10)
+LOSS_LEVELS=(1)
 
 # Headless Locust run duration per combination (seconds).
 # This is now the ONLY stop condition — NUM_REQUESTS cap was removed
@@ -98,9 +98,36 @@ teardown() {
   docker compose down -v --remove-orphans || true
 }
 
+validate_handshake() {
+  local kem_label="$1"
+  local kem_value="$2"
+  local openssl_bin
+
+  openssl_bin="$(docker compose exec -T oqs-locust sh -lc 'if command -v openssl >/dev/null 2>&1; then command -v openssl; elif [ -x /opt/oqssa/bin/openssl ]; then echo /opt/oqssa/bin/openssl; elif [ -x /opt/openssl/apps/openssl ]; then echo /opt/openssl/apps/openssl; fi' | tr -d '\r' | tail -n1)"
+
+  if [[ -z "${openssl_bin}" ]]; then
+    log "ERROR: no OpenSSL client binary found in oqs-locust container."
+    log "ERROR: checked: openssl, /opt/oqssa/bin/openssl, /opt/openssl/apps/openssl"
+    return 1
+  fi
+
+  log "Validating TLS handshake for ${kem_label} (${kem_value}) before load run (bin=${openssl_bin})..."
+  if ! docker compose exec -T oqs-locust \
+    sh -lc "printf 'GET /health HTTP/1.1\\r\\nHost: oqs-nginx\\r\\nConnection: close\\r\\n\\r\\n' | '${openssl_bin}' s_client -connect oqs-nginx:4433 -groups '${kem_value}' -quiet >/dev/null 2>&1"; then
+    log "ERROR: preflight handshake failed for ${kem_label} (${kem_value})."
+    log "ERROR: Client/Server TLS groups likely do not match or classical group is unsupported in this image build."
+    docker compose logs --tail=80 oqs-nginx || true
+    return 1
+  fi
+
+  log "Preflight handshake OK for ${kem_label} (${kem_value})."
+}
+
 start_up_containers() {
   local kem_label="$1"
   local kem_value="$2"
+
+  teardown
 
   log "Starting up containers for KEM group ${kem_label} (${kem_value})..."
 
@@ -119,6 +146,12 @@ start_up_containers() {
 
   docker compose exec -T -u root oqs-locust sed -i 's/https:\/\//http:\/\//g' /etc/apk/repositories
   docker compose exec -T -u root oqs-locust apk add --no-cache iproute2 tshark
+
+  if ! validate_handshake "${kem_label}" "${kem_value}"; then
+    log "ERROR: handshake validation failed for KEM group ${kem_label} (${kem_value})."
+    teardown
+    return 1
+  fi
 }
 
 run_one_combination() {
@@ -266,6 +299,8 @@ main() {
         done
       done
     done
+
+    teardown
 
   done
 
