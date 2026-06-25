@@ -9,4 +9,6 @@ pcaps/
 # Generated files
 locust/__pycache__/
 locust/nginx.conf
+locust/results*
 logs/
+nginx/nginx.conf

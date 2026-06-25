@@ -27,18 +27,19 @@ export MSYS_NO_PATHCONV=1
 # Naming has varied across OQS-provider versions (e.g. mlkem768 vs MLKEM768
 # vs draft names like kyber768). Edit the values below, not the labels.
 declare -A KEM_GROUPS=(
-  [classical]="X25519"
-  [hybrid]="X25519MLKEM768"
+  # [classical]="X25519"
+  # [hybrid]="X25519MLKEM768"
+  [pure-pq]="mlkem768"
 )
 
-USER_LEVELS=(20)
+USER_LEVELS=(1)
 LATENCIES=(0)
-LOSS_LEVELS=(1)
+LOSS_LEVELS=(0)
 
 # Headless Locust run duration per combination (seconds).
 # This is now the ONLY stop condition — NUM_REQUESTS cap was removed
 # from locustfile.py, so runs no longer end early.
-DURATION="60s"
+DURATION="30s"
 
 REPETITIONS_PER_TEST=1
 
