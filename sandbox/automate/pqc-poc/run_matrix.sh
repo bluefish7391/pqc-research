@@ -35,7 +35,7 @@ USER_LEVELS=(1)
 LATENCIES=(0)
 LOSS_LEVELS=(0)
 
-DURATION="30s" # Headless Locust run duration per combination (seconds).
+DURATION="10s" # Headless Locust run duration per combination (seconds).
 REPETITIONS_PER_TEST=1 # Number of times to repeat each combination for averaging or variance analysis.
 
 # Sets how fast Locust ramps to the target user count.
@@ -356,8 +356,8 @@ main() {
         for loss in "${LOSS_LEVELS[@]}"; do
           for ((rep=1; rep<=REPETITIONS_PER_TEST; rep++)); do
             run_one_combination "${kem_label}" "${kem_value}" "${users}" "${latency}" "${loss}" "${rep}" "$((total_trials_performed + 1))"
-            (( total_trials_performed++ ))
-            
+            (( total_trials_performed += 1 ))
+
             # Clear the terminal every 3 trials to keep the output manageable and avoid cluttering the screen with too many logs.
             if [ $((total_trials_performed % 3)) -eq 0 ]; then
               clear
