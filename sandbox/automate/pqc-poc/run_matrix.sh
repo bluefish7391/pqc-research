@@ -107,6 +107,9 @@ wait_for_healthy() {
 # == Validation =================================================================
 
 find_openssl_bin() {
+  # Look for an OpenSSL binary inside the oqs-locust container.
+  # The location of the binary may vary depending on the image build, so multiple common locations are checked. 
+  # If found, the path to the binary is returned; otherwise, exit with an error.
   local search_script=$(cat << 'EOF'
     if command -v openssl >/dev/null 2>&1; then
       command -v openssl
@@ -115,11 +118,15 @@ find_openssl_bin() {
     elif [ -x /opt/openssl/apps/openssl ]; then
       echo /opt/openssl/apps/openssl
     else
-      echo ""
+      log "ERROR: no OpenSSL client binary found in oqs-locust container."
+      log "ERROR: checked: openssl, /opt/oqssa/bin/openssl, /opt/openssl/apps/openssl"
+      exit 1
     fi
 EOF
   )
 
+  # Run the search script inside the oqs-locust container and capture the output,
+  # stripping any carriage returns and taking only the last line (the path to the binary).
   local openssl_bin
   openssl_bin=$(docker compose exec -T oqs-locust sh -lc "${search_script}" \
     | tr -d '\r' \
