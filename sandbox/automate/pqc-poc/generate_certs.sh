@@ -1,13 +1,12 @@
 #!/usr/bin/env bash
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-#  generate_certs.sh — Generates classical ECDSA P-256 certificates
-#  for the KD Protocol Benchmarking PoC using the OQS OpenSSL image.
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# Generate certificates for the nginx webserver using OpenSSL in a Docker container.
+# This script creates a self-signed CA and a server certificate signed by that CA.
+# To be run once on the host machine.
+# The generated certificates are stored in the ./certs directory.
 
 set -euo pipefail
 
 CERTS_DIR="$(pwd)/certs"
-# SWAPPED: Using the dedicated openssl image instead of the nginx webserver image
 DOCKER_IMAGE="openquantumsafe/openssl3:latest"
 
 echo "Creating certs directory at ${CERTS_DIR}..."
@@ -43,9 +42,9 @@ docker run --rm -v "${CERTS_DIR}:/working" -w /working "${DOCKER_IMAGE}" sh -c '
 '
 
 # Because Docker runs as root by default, the generated files will be owned by root.
-# This changes ownership back to your current Ubuntu user so you can easily view/delete them.
+# Changing ownership back to the Ubuntu user so they can easily be viewed/deleted.
 echo "Adjusting file permissions..."
 sudo chown -R $(id -u):$(id -g) "${CERTS_DIR}"
 
-echo "✅ Certificate generation complete! Files are located in ./certs/"
-ls -la "${CERTS_DIR}"
+echo "Certificate generation complete! Files are located in ./certs/"
+ls -la "${CERTS_DIR}" # List the generated files for verification.
