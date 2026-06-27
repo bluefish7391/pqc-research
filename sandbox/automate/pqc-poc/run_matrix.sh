@@ -148,6 +148,9 @@ validate_handshake() {
   fi
 
   log "Validating TLS handshake for ${kem_label} (${kem_value}) before load run (bin=${openssl_bin})..."
+
+  # Docker compose steps into the oqs-locust container and runs a one-off command to perform a TLS handshake with the oqs-nginx server using the specified KEM group.
+  # The command uses OpenSSL's s_client to connect to the server and perform a handshake. If the handshake fails, an error is logged and the function exits.
   if ! docker compose exec -T oqs-locust \
     sh -lc "printf 'GET /health HTTP/1.1\\r\\nHost: oqs-nginx\\r\\nConnection: close\\r\\n\\r\\n' | '${openssl_bin}' s_client -connect oqs-nginx:4433 -groups '${kem_value}' -quiet >/dev/null 2>&1"; then
     log "ERROR: preflight handshake failed for ${kem_label} (${kem_value})."
@@ -159,7 +162,11 @@ validate_handshake() {
   log "Preflight handshake OK for ${kem_label} (${kem_value})."
 }
 
+# == Main Execution Functions ====================================================
+
 start_up_containers() {
+  # Start up the oqs-nginx and oqs-locust containers for a specific KEM group, and validate that the handshake works before proceeding with the load test.
+
   local kem_label="$1"
   local kem_value="$2"
 
@@ -167,10 +174,14 @@ start_up_containers() {
 
   log "Starting up containers for KEM group ${kem_label} (${kem_value})..."
 
+  # Set the environment variable for the KEM group so that the locust file can pick it up and know to use the correct KEM group.
   export OQS_KEM_GROUP="${kem_value}"
 
+  # Build tag is used to ensure that the image is rebuilt with the updated nginx.conf for the specific KEM group.
+  # Only the oqs-nginx service needs to be rebuilt, as the oqs-locust service determines the KEM group at runtime via the OQS_KEM_GROUP environment variable.
+  # On the other hand, the nginx.conf file is baked into the oqs-nginx image at build time, so it must be rebuilt for each KEM group.
   render_nginx_conf "${kem_value}"
-  docker compose up -d --build oqs-nginx
+  docker compose up -d --build oqs-nginx 
 
   if ! wait_for_healthy; then
     log "ERROR: nginx did not become healthy for KEM group ${kem_label} (${kem_value})."
@@ -180,8 +191,15 @@ start_up_containers() {
 
   docker compose up -d --build oqs-locust
 
+  # The oqs-locust container is based on Alpine Linux, which uses the 'apk' package manager. Due to the minimalist nature of the locust image,
+  # it lacks the security certificates needed to validate HTTPS connections. To get around this, the alpine respositories file is modified by
+  # replacing 'https://' with 'http://', allowing the package manager to fetch packages over HTTP. Then, the necessary packages for network 
+  # emulation and packet capture are installed.
+
+  # It is safe to use HTTP here because while the requests and responses are unsecured by TLS, the Alpine package repositories are signed, and 
+  # the package manager will verify the signatures of the packages it downloads.
   docker compose exec -T -u root oqs-locust sed -i 's/https:\/\//http:\/\//g' /etc/apk/repositories
-  docker compose exec -T -u root oqs-locust apk add --no-cache iproute2 tshark
+  docker compose exec -T -u root oqs-locust apk add --no-cache iproute2 tshark # --no-cache avoids caching the package index, saving space in the container.
 
   if ! validate_handshake "${kem_label}" "${kem_value}"; then
     log "ERROR: handshake validation failed for KEM group ${kem_label} (${kem_value})."
@@ -209,15 +227,21 @@ run_one_combination() {
   docker compose exec -T -u root oqs-locust tc qdisc del dev eth0 root netem || true
 
   log "Injecting network conditions: ${latency_ms}ms delay, ${loss_pct}% loss..."
+  # The tc command adds a queuing discipline (qdisc) to the eth0 network interface of the oqs-locust container, introducing artificial latency and packet loss.
+  # This only affects the outgoing traffic from the locust container to the nginx container, which is unrealistic, but it is a simple way to simulate network 
+  # conditions for testing purposes. For actual experimental data, traffic coming from the nginx container to the locust container should also be affected,
+  # especially with packet loss.
   docker compose exec -T -u root oqs-locust tc qdisc add dev eth0 root netem delay "${latency_ms}ms" loss "${loss_pct}%"
 
+  # Start tshark in the background to capture packets on eth0, filtering for traffic to/from the oqs-nginx container on port 4433.
+  # Write the captured packets to a pcap file named after the run_id in the PCAP_DIR.
   docker compose exec -T -u root oqs-locust \
     tshark \
       -i eth0 \
       -f "host oqs-nginx and tcp port 4433" \
       -w "/mnt/pcaps/${run_id}.pcap" \
     &
-  TSHARK_PID=$!
+  TSHARK_PID=$! # Store the PID of the background tshark process so it can be terminated later after the locust run is complete.
   sleep 1
 
   local cpu_log_file="${RESULTS_DIR}/cpu_matrix_${run_id}.csv"
@@ -225,26 +249,28 @@ run_one_combination() {
 
   log "Spawning background monitor (waiting for locust to spin up)..."
   (
-    # 1. Block and wait until the 'locust' process appears inside the container
+    # Wait until the 'locust' process appears inside the container by repeatedly checking the output of docker top for the container.
     until docker top oqs-locust 2>/dev/null | grep -E "locust" >/dev/null 2>&1; do
       sleep 0.2
     done
 
     log "Locust detected! Tracking CPU, Mem, and Network volume..."
 
-    # 2. Loop continuously while locust is alive
+    # Loop continuously while locust is alive, again by repeatedly checking docker top.
     while docker top oqs-locust 2>/dev/null | grep -E "locust" >/dev/null 2>&1; do
-      
-      # Use --no-stream to force a fresh CPU delta calculation.
-      # This inherently takes ~1 second to run, acting as its own perfect timer!
+      # Takes a snapshot of the CPU, memory, and network I/O stats for both the oqs-locust and oqs-nginx containers using docker stats.
+      # The output is formatted as CSV with the container name, CPU percentage, memory usage, and network I/O (received and transmitted bytes).
       stats_output=$(docker stats --no-stream --format "{{.Name}},{{.CPUPerc}},{{.MemUsage}},{{.NetIO}}" oqs-locust oqs-nginx 2>/dev/null)
       
       # Grab the timestamp the moment the snapshot finishes
       current_time=$(date '+%Y-%m-%d %H:%M:%S')
 
-      # Write both container stats to the file with the exact same timestamp
+      # Write both container stats to the file with the exact same timestamp.
+      # At this point, stats_output contains two lines, one for each container separated by a newline character. The while loop reads each line 
+      # of stats_output, and if the line is not empty, it appends the current timestamp and the line to the cpu_log_file.
       echo "${stats_output}" | while read -r line; do
-        if [ -n "${line}" ]; then
+        # Make sure the line is not empty before writing to the log file.
+        if [ -n "${line}" ]; then 
           echo "${current_time},${line}" >> "${cpu_log_file}"
         fi
       done
@@ -255,10 +281,8 @@ run_one_combination() {
   ) &
   CPU_MONITOR_PID=$!
 
-  # Run Locust headless INSIDE the already-up container via docker compose run,
+  # Run Locust headless inside the already-up container via docker compose run,
   # overriding the default `command` to pass headless flags explicitly.
-  # We run it as a one-off `exec` against the running container so the
-  # service's environment (OQS_KEM_GROUP, etc.) is preserved.
   log "Starting headless Locust run..."
   docker compose exec -T oqs-locust \
     locust \
@@ -273,14 +297,19 @@ run_one_combination() {
       --csv-full-history \
     || log "WARNING: locust exited non-zero for ${run_id} (check stats before discarding the run)"
 
+  # After the locust run is complete, terminate the background CPU monitor cleanly.
   kill $CPU_MONITOR_PID 2>/dev/null || true
   wait $CPU_MONITOR_PID 2>/dev/null || true
 
+  # Terminate the tshark monitor inside the container cleanly by sending a SIGINT signal, which allows tshark to flush its buffers 
+  # and write the pcap file properly. This in turn kills the docker compose exec command, which is why the wait command is used to
+  # ensure that the tshark process has exited before proceeding.
   docker compose exec -T -u root oqs-locust pkill -SIGINT tshark 2>/dev/null || true
   wait $TSHARK_PID 2>/dev/null || true
 
   extract_pcap_metrics "${run_id}"
 
+  # Checks if any CSV output files match the the expected pattern before attempting to move them to the results directory.
   if compgen -G "${LOCUST_OUT_DIR}/results_${run_id}*" > /dev/null; then
     mv "${LOCUST_OUT_DIR}"/results_"${run_id}"* "${RESULTS_DIR}/"
     log "Moved results_${run_id}* to ${RESULTS_DIR}/"
@@ -294,13 +323,14 @@ extract_pcap_metrics() {
   local pcap="/mnt/pcaps/${run_id}.pcap"
   local out="${RESULTS_DIR}/pcap_summary_${run_id}.csv"
 
+  # Use tshark to read the pcap file and generate a summary of TCP retransmissions, writing the output to a CSV file in the results directory.
   docker compose exec -T oqs-locust \
     tshark -r "${pcap}" -q \
       -z "io,stat,0,tcp.len,tcp.analysis.retransmission" \
     > "${out}" 2>&1 || log "WARNING: tshark summary failed for ${run_id}"
 }
 
-# ── Main sweep ───────────────────────────────────────────────────────────
+# == Main Execution =============================================================
 
 main() {
   log "Starting KD protocol benchmark matrix sweep."
