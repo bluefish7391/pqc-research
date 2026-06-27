@@ -17,15 +17,15 @@
 
 set -euo pipefail
 
+# Disable automatic path conversion on Windows (MSYS2 / Git Bash) to avoid
+# issues with volume mounts and file paths in docker compose.
+# Environment variable inherited by subprocesses spawned by this script for 
+# this shell session, including docker compose itself.
 export MSYS_NO_PATHCONV=1
 
-# ── Matrix definition ───────────────────────────────────────────────────
-# IMPORTANT: confirm these group strings match what your specific
-# openquantumsafe/nginx:latest build's OQS-OpenSSL provider expects.
-# Check with:
-#   docker run --rm openquantumsafe/nginx:latest openssl list -kem-algorithms
-# Naming has varied across OQS-provider versions (e.g. mlkem768 vs MLKEM768
-# vs draft names like kyber768). Edit the values below, not the labels.
+# KEM_GROUPS is an associative array (like a dictionary or a hashmap) mapping
+# a human-readable label to the corresponding OpenSSL group name. The label 
+# is used in output filenames and logs.
 declare -A KEM_GROUPS=(
   [classical]="X25519"
   [hybrid]="X25519MLKEM768"
@@ -35,35 +35,36 @@ USER_LEVELS=(1)
 LATENCIES=(0)
 LOSS_LEVELS=(0)
 
-# Headless Locust run duration per combination (seconds).
-# This is now the ONLY stop condition — NUM_REQUESTS cap was removed
-# from locustfile.py, so runs no longer end early.
-DURATION="30s"
+DURATION="30s" # Headless Locust run duration per combination (seconds).
+REPETITIONS_PER_TEST=1 # Number of times to repeat each combination for averaging or variance analysis.
 
-REPETITIONS_PER_TEST=1
-
-# Spawn rate: how fast Locust ramps to the target user count.
-# Kept equal to user count so ramp-up is fast relative to DURATION;
-# adjust if you want to study ramp behavior itself.
+# Sets how fast Locust ramps to the target user count.
+# Can be adjusted later to implement warm up periods and avoid excessive load spikes.
 SPAWN_RATE_FN() { echo "$1"; }
 
-# ── Paths ────────────────────────────────────────────────────────────────
+# Identifies the name of this file, then the directory containing said file, and sets PROJECT_DIR to that path.
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 NGINX_TMPL="${PROJECT_DIR}/nginx/nginx.conf.tmpl"
 NGINX_CONF="${PROJECT_DIR}/nginx/nginx.conf"
 RESULTS_DIR="${PROJECT_DIR}/data/results"
 LOCUST_OUT_DIR="${PROJECT_DIR}/locust"
 PCAP_DIR="${PROJECT_DIR}/data/pcaps"
 
+# Create directories for results, pcaps, and logs if they don't exist yet,
+# as these are untracked by git and may not be present in a fresh clone.
 mkdir -p "${RESULTS_DIR}" "${PCAP_DIR}" "${PROJECT_DIR}/logs"
 touch "${PROJECT_DIR}/logs/run_matrix.log"
 
-# ── Helpers ──────────────────────────────────────────────────────────────
+# == Helpers ==================================================================
 
 log() {
-  local timestamped_message="[$(date '+%Y-%m-%d %H:%M:%S')] $*"
-  echo "${timestamped_message}"
-  echo "${timestamped_message}" >> "${PROJECT_DIR}/logs/run_matrix.log"
+  echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" | tee -a "${PROJECT_DIR}/logs/run_matrix.log"
+}
+
+teardown() {
+  log "Tearing down (docker compose down -v)..."
+  docker compose down -v --remove-orphans || true
 }
 
 render_nginx_conf() {
@@ -73,32 +74,42 @@ render_nginx_conf() {
 }
 
 wait_for_healthy() {
+  # Wait for the oqs-nginx container to report a healthy status via its healthcheck.
+  # If it does not become healthy within max_wait seconds, logs are dumped and an error is returned.
+
   local container="oqs-nginx"
   local max_wait=60
   local waited=0
   log "Waiting for ${container} healthcheck..."
+
   while true; do
+    # Inspect the nginx container, and extract just the health status. If the container is not found, return "unknown".
+    # Do not fail the script if the container is not found yet, as it may take a few seconds for docker compose to start it.
+    # DO not log any errors from docker inspect to avoid cluttering the output.
     status="$(docker inspect --format='{{.State.Health.Status}}' "${container}" 2>/dev/null || echo "unknown")"
+
     if [[ "${status}" == "healthy" ]]; then
       log "${container} is healthy."
       return 0
     fi
+
     if (( waited >= max_wait )); then
       log "ERROR: ${container} did not become healthy within ${max_wait}s (status=${status})."
       docker compose logs oqs-nginx || true
       return 1
     fi
+    
     sleep 2
-    waited=$(( waited + 2 ))
+    (( waited += 2))
   done
 }
 
-teardown() {
-  log "Tearing down (docker compose down -v)..."
-  docker compose down -v --remove-orphans || true
-}
+# == Validation =================================================================
 
 validate_handshake() {
+  # Validate that the oqs-locust client can successfully perform a TLS handshake with the oqs-nginx server using the specified KEM group.
+  # This is a preflight check to ensure that the server and client are configured correctly before running the load test.
+
   local kem_label="$1"
   local kem_value="$2"
   local openssl_bin
