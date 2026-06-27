@@ -27,9 +27,8 @@ export MSYS_NO_PATHCONV=1
 # Naming has varied across OQS-provider versions (e.g. mlkem768 vs MLKEM768
 # vs draft names like kyber768). Edit the values below, not the labels.
 declare -A KEM_GROUPS=(
-  # [classical]="X25519"
-  # [hybrid]="X25519MLKEM768"
-  [pure-pq]="mlkem768"
+  [classical]="X25519"
+  [hybrid]="X25519MLKEM768"
 )
 
 USER_LEVELS=(1)
