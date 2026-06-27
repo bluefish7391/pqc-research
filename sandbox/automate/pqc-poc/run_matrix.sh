@@ -106,15 +106,34 @@ wait_for_healthy() {
 
 # == Validation =================================================================
 
+find_openssl_bin() {
+  local search_script=$(cat << 'EOF'
+    if command -v openssl >/dev/null 2>&1; then
+      command -v openssl
+    elif [ -x /opt/oqssa/bin/openssl ]; then
+      echo /opt/oqssa/bin/openssl
+    elif [ -x /opt/openssl/apps/openssl ]; then
+      echo /opt/openssl/apps/openssl
+    else
+      echo ""
+    fi
+EOF
+  )
+
+  local openssl_bin
+  openssl_bin=$(docker compose exec -T oqs-locust sh -lc "${search_script}" \
+    | tr -d '\r' \
+    | tail -n1)
+  echo "${openssl_bin}"
+}
+
 validate_handshake() {
   # Validate that the oqs-locust client can successfully perform a TLS handshake with the oqs-nginx server using the specified KEM group.
   # This is a preflight check to ensure that the server and client are configured correctly before running the load test.
 
   local kem_label="$1"
   local kem_value="$2"
-  local openssl_bin
-
-  openssl_bin="$(docker compose exec -T oqs-locust sh -lc 'if command -v openssl >/dev/null 2>&1; then command -v openssl; elif [ -x /opt/oqssa/bin/openssl ]; then echo /opt/oqssa/bin/openssl; elif [ -x /opt/openssl/apps/openssl ]; then echo /opt/openssl/apps/openssl; fi' | tr -d '\r' | tail -n1)"
+  local openssl_bin=$(find_openssl_bin)
 
   if [[ -z "${openssl_bin}" ]]; then
     log "ERROR: no OpenSSL client binary found in oqs-locust container."
