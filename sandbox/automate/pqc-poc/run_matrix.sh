@@ -17,7 +17,7 @@
 
 set -euo pipefail
 
-source ./main_execution.sh
+source ./run_trial.sh
 
 # Disable automatic path conversion on Windows (MSYS2 / Git Bash) to avoid
 # issues with volume mounts and file paths in docker compose.
