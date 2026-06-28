@@ -48,6 +48,8 @@ class TLSHandshakeUser(User):
         up the OQS provider library. This is done to avoid measuring the library 
         initialization time in the first handshake. It is only necessary to do this 
         once, so subsequent users will skip this step.
+
+        TODO: remove this preload step since the first 30 seconds of data will be discarded anyway.
         """
         with TLSHandshakeUser._preload_lock: # Ensure that only one user enters this block at a time.
             if not TLSHandshakeUser._preloaded:

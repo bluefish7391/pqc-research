@@ -206,6 +206,10 @@ start_up_containers() {
     teardown
     return 1
   fi
+
+  NGINX_PID=$(docker inspect --format '{{.State.Pid}}' oqs-nginx)
+  LOCUST_PID=$(docker inspect --format '{{.State.Pid}}' oqs-locust)
+  log "nginx PID: ${NGINX_PID}, locust PID: ${LOCUST_PID}"
 }
 
 run_one_combination() {
@@ -249,35 +253,59 @@ run_one_combination() {
 
   log "Spawning background monitor (waiting for locust to spin up)..."
   (
-    # Wait until the 'locust' process appears inside the container by repeatedly checking the output of docker top for the container.
-    until docker top oqs-locust 2>/dev/null | grep -E "locust" >/dev/null 2>&1; do
-      sleep 0.2
-    done
+    # Stream pidstat output for both PIDs into a background coprocess.
+    # Interval=1, no end count = runs until the pipe is closed.
+    # -u = CPU, -r = memory, -T ALL = include child processes (nginx workers, locust greenlets).
+    pidstat -u -r -T ALL -p "${NGINX_PID},${LOCUST_PID}" 1 \
+      > /tmp/pidstat_stream.txt 2>/dev/null &
+    PIDSTAT_PID=$!
 
-    log "Locust detected! Tracking CPU, Mem, and Network volume..."
-
-    # Loop continuously while locust is alive, again by repeatedly checking docker top.
-    while docker top oqs-locust 2>/dev/null | grep -E "locust" >/dev/null 2>&1; do
-      # Takes a snapshot of the CPU, memory, and network I/O stats for both the oqs-locust and oqs-nginx containers using docker stats.
-      # The output is formatted as CSV with the container name, CPU percentage, memory usage, and network I/O (received and transmitted bytes).
-      stats_output=$(docker stats --no-stream --format "{{.Name}},{{.CPUPerc}},{{.MemUsage}},{{.NetIO}}" oqs-locust oqs-nginx 2>/dev/null)
-      
-      # Grab the timestamp the moment the snapshot finishes
+    while true; do
+      sleep 1
       current_time=$(date '+%Y-%m-%d %H:%M:%S')
 
-      # Write both container stats to the file with the exact same timestamp.
-      # At this point, stats_output contains two lines, one for each container separated by a newline character. The while loop reads each line 
-      # of stats_output, and if the line is not empty, it appends the current timestamp and the line to the cpu_log_file.
-      echo "${stats_output}" | while read -r line; do
-        # Make sure the line is not empty before writing to the log file.
-        if [ -n "${line}" ]; then 
-          echo "${current_time},${line}" >> "${cpu_log_file}"
-        fi
-      done
-      
+      # ── CPU + memory: read the latest pidstat output ─────────────────
+      # pidstat streams one block per interval. tail -n 20 gets the most
+      # recent block; awk extracts the row matching each PID.
+      pidstat_snapshot=$(tail -n 20 /tmp/pidstat_stream.txt 2>/dev/null)
+
+      read nginx_cpu nginx_mem <<< $(
+        echo "${pidstat_snapshot}" \
+          | awk -v pid="${NGINX_PID}" '
+              /^[0-9]/ && $3 == pid { printf "%s %s", $8, $12 }
+            '
+      )
+
+      read locust_cpu locust_mem <<< $(
+        echo "${pidstat_snapshot}" \
+          | awk -v pid="${LOCUST_PID}" '
+              /^[0-9]/ && $3 == pid { printf "%s %s", $8, $12 }
+            '
+      )
+
+      # ── Network I/O: single read of /proc/net/dev per container ──────
+      read nginx_rx nginx_tx <<< $(
+        docker compose exec -T oqs-nginx cat /proc/net/dev 2>/dev/null \
+          | awk '/eth0/ { print $2, $10 }'
+      )
+
+      read locust_rx locust_tx <<< $(
+        docker compose exec -T oqs-locust cat /proc/net/dev 2>/dev/null \
+          | awk '/eth0/ { print $2, $10 }'
+      )
+
+      # ── Write one row per container ───────────────────────────────────
+      echo "${current_time},oqs-nginx,${nginx_cpu:-0}%,${nginx_mem:-0}kB,${nginx_rx:-0}/${nginx_tx:-0}" \
+        >> "${cpu_log_file}"
+      echo "${current_time},oqs-locust,${locust_cpu:-0}%,${locust_mem:-0}kB,${locust_rx:-0}/${locust_tx:-0}" \
+        >> "${cpu_log_file}"
+
     done
 
-    log "Benchmark finished. Resource collection closed."
+    kill "${PIDSTAT_PID}" 2>/dev/null
+    wait "${PIDSTAT_PID}" 2>/dev/null || true
+    rm -f /tmp/pidstat_stream.txt
+
   ) &
   CPU_MONITOR_PID=$!
 
@@ -298,8 +326,8 @@ run_one_combination() {
     || log "WARNING: locust exited non-zero for ${run_id} (check stats before discarding the run)"
 
   # After the locust run is complete, terminate the background CPU monitor cleanly.
-  kill $CPU_MONITOR_PID 2>/dev/null || true
-  wait $CPU_MONITOR_PID 2>/dev/null || true
+  kill "${CPU_MONITOR_PID}" 2>/dev/null
+  wait "${CPU_MONITOR_PID}" 2>/dev/null || true
 
   # Terminate the tshark monitor inside the container cleanly by sending a SIGINT signal, which allows tshark to flush its buffers 
   # and write the pcap file properly. This in turn kills the docker compose exec command, which is why the wait command is used to
