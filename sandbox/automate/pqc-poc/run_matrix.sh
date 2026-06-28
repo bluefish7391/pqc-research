@@ -207,9 +207,11 @@ start_up_containers() {
     return 1
   fi
 
-  NGINX_PID=$(docker inspect --format '{{.State.Pid}}' oqs-nginx)
-  LOCUST_PID=$(docker inspect --format '{{.State.Pid}}' oqs-locust)
-  log "nginx PID: ${NGINX_PID}, locust PID: ${LOCUST_PID}"
+  NGINX_PIDS=$(docker top oqs-nginx -o pid,comm \
+    | awk '/nginx/ {print $1}' \
+    | tr '\n' ',' \
+    | sed 's/,$//')
+  log "nginx PIDs: ${NGINX_PIDS}"
 }
 
 run_one_combination() {
@@ -253,10 +255,18 @@ run_one_combination() {
 
   log "Spawning background monitor (waiting for locust to spin up)..."
   (
+    until docker top oqs-locust 2>/dev/null | grep -v tshark | grep -q locust; do
+      sleep 0.2
+    done
+    LOCUST_PROC_PID=$(docker top oqs-locust -o pid,comm \
+      | awk '/locust/ {print $1}' \
+      | head -n1)
+    log "locust PID: ${LOCUST_PROC_PID}"
+
     # Stream pidstat output for both PIDs into a background coprocess.
     # Interval=1, no end count = runs until the pipe is closed.
     # -u = CPU, -r = memory, -T ALL = include child processes (nginx workers, locust greenlets).
-    pidstat -u -r -T ALL -p "${NGINX_PID},${LOCUST_PID}" 1 \
+    pidstat -u -r -T ALL -p "${NGINX_PIDS},${LOCUST_PROC_PID}" 1 \
       > /tmp/pidstat_stream.txt 2>/dev/null &
     PIDSTAT_PID=$!
 
@@ -271,14 +281,14 @@ run_one_combination() {
 
       read nginx_cpu nginx_mem <<< $(
         echo "${pidstat_snapshot}" \
-          | awk -v pid="${NGINX_PID}" '
+          | awk -v pid="${NGINX_PIDS}" '
               /^[0-9]/ && $3 == pid { printf "%s %s", $8, $12 }
             '
       )
 
       read locust_cpu locust_mem <<< $(
         echo "${pidstat_snapshot}" \
-          | awk -v pid="${LOCUST_PID}" '
+          | awk -v pid="${LOCUST_PROC_PID}" '
               /^[0-9]/ && $3 == pid { printf "%s %s", $8, $12 }
             '
       )
