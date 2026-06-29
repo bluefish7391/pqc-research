@@ -4,6 +4,12 @@
 SPAWN_RATE_FN() { echo "$1"; }
 
 extract_pcap_metrics() {
+  # TODO: This function currently only extracts a basic retransmission summary.
+  # Before real data collection, expand to extract:
+  #   - Total handshake bytes (ClientHello size, server handshake size, total)
+  #   - Handshake packet count and TCP segment count per stream
+  #   - Per-stream retransmission count (not just aggregate)
+
   local run_id="$1"
   local pcap="/mnt/pcaps/${run_id}.pcap"
   local out="${RESULTS_DIR}/pcap_summary_${run_id}.csv"
@@ -37,7 +43,7 @@ run_one_combination() {
   # The tc command adds a queuing discipline (qdisc) to the eth0 network interface of the oqs-locust container, introducing artificial latency and packet loss.
   # This only affects the outgoing traffic from the locust container to the nginx container, which is unrealistic, but it is a simple way to simulate network 
   # conditions for testing purposes. For actual experimental data, traffic coming from the nginx container to the locust container should also be affected,
-  # especially with packet loss.
+  # especially with packet loss. This will be resolved in the three-node setup.
   docker compose exec -T -u root oqs-locust tc qdisc add dev eth0 root netem delay "${latency_ms}ms" loss "${loss_pct}%"
 
   # Start tshark in the background to capture packets on eth0, filtering for traffic to/from the oqs-nginx container on port 4433.
