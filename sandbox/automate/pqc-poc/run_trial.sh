@@ -58,72 +58,27 @@ run_one_combination() {
 
   log "Spawning background monitor (waiting for locust to spin up)..."
   (
-    until docker top oqs-locust 2>/dev/null | grep -v tshark | grep -q locust; do
+    until docker top oqs-locust 2>/dev/null | grep -E "locust" >/dev/null 2>&1; do
       sleep 0.2
     done
-    LOCUST_PROC_PID=$(docker top oqs-locust -o pid,comm \
-      | awk '/locust/ {print $1}' \
-      | head -n1)
-    log "locust PID: ${LOCUST_PROC_PID}"
 
-    # Stream pidstat output for both PIDs into a background coprocess.
-    # Interval=1, no end count = runs until the pipe is closed.
-    # -u = CPU, -r = memory, -T ALL = include child processes (nginx workers, locust greenlets).
-    pidstat -u -r -T ALL -p "${NGINX_PIDS},${LOCUST_PROC_PID}" 1 \
-      > /tmp/pidstat_stream.txt 2>/dev/null &
-    PIDSTAT_PID=$!
+    log "Locust detected! Starting container-level resource monitor..."
 
     while true; do
-      sleep 1
       current_time=$(date '+%Y-%m-%d %H:%M:%S')
 
-      # ── CPU + memory: read the latest pidstat output ─────────────────
-      # pidstat streams one block per interval. tail -n 20 gets the most
-      # recent block; awk extracts the row matching each PID.
-      pidstat_snapshot=$(tail -n 20 /tmp/pidstat_stream.txt 2>/dev/null)
+      docker stats --no-stream --format '{{.Name}},{{.CPUPerc}},{{.MemUsage}},{{.NetIO}}' oqs-locust oqs-nginx 2>/dev/null \
+        | while IFS=',' read -r c_name cpu_perc mem_schema net_io; do
+            if [ -n "$c_name" ] && [ -n "$cpu_perc" ] && [ -n "$mem_schema" ]; then
+              echo "${current_time},${c_name},${cpu_perc},${mem_schema},${net_io}" >> "${cpu_log_file}"
+            fi
+          done
 
-      read nginx_cpu nginx_mem <<< $(
-        echo "${pidstat_snapshot}" \
-          | awk -v pid="${NGINX_PIDS}" '
-              /^[0-9]/ && $3 == pid { printf "%s %s", $8, $12 }
-            '
-      )
-
-      read locust_cpu locust_mem <<< $(
-        echo "${pidstat_snapshot}" \
-          | awk -v pid="${LOCUST_PROC_PID}" '
-              /^[0-9]/ && $3 == pid { printf "%s %s", $8, $12 }
-            '
-      )
-
-      # ── Network I/O: single read of /proc/net/dev per container ──────
-      read nginx_rx nginx_tx <<< $(
-        docker compose exec -T oqs-nginx cat /proc/net/dev 2>/dev/null \
-          | awk '/eth0/ { print $2, $10 }'
-      )
-
-      read locust_rx locust_tx <<< $(
-        docker compose exec -T oqs-locust cat /proc/net/dev 2>/dev/null \
-          | awk '/eth0/ { print $2, $10 }'
-      )
-
-      # ── Write one row per container ───────────────────────────────────
-      echo "${current_time},oqs-nginx,${nginx_cpu:-0}%,${nginx_mem:-0}kB,${nginx_rx:-0}/${nginx_tx:-0}" \
-        >> "${cpu_log_file}"
-      echo "${current_time},oqs-locust,${locust_cpu:-0}%,${locust_mem:-0}kB,${locust_rx:-0}/${locust_tx:-0}" \
-        >> "${cpu_log_file}"
-
+      sleep 1
     done
-
-    kill "${PIDSTAT_PID}" 2>/dev/null
-    wait "${PIDSTAT_PID}" 2>/dev/null || true
-    rm -f /tmp/pidstat_stream.txt
-
   ) &
-  CPU_MONITOR_PID=$!
+  SAMPLER_PID=$!
 
-  # Run Locust headless inside the already-up container via docker compose run,
-  # overriding the default `command` to pass headless flags explicitly.
   log "Starting headless Locust run..."
   docker compose exec -T oqs-locust \
     locust \
@@ -138,9 +93,9 @@ run_one_combination() {
       --csv-full-history \
     || log "WARNING: locust exited non-zero for ${run_id} (check stats before discarding the run)"
 
-  # After the locust run is complete, terminate the background CPU monitor cleanly.
-  kill "${CPU_MONITOR_PID}" 2>/dev/null
-  wait "${CPU_MONITOR_PID}" 2>/dev/null || true
+  kill "${SAMPLER_PID}" 2>/dev/null || true
+  pkill -P "${SAMPLER_PID}" 2>/dev/null || true
+  wait "${SAMPLER_PID}" 2>/dev/null || true
 
   # Terminate the tshark monitor inside the container cleanly by sending a SIGINT signal, which allows tshark to flush its buffers 
   # and write the pcap file properly. This in turn kills the docker compose exec command, which is why the wait command is used to

@@ -37,7 +37,7 @@ USER_LEVELS=(1)
 LATENCIES=(0)
 LOSS_LEVELS=(0)
 
-DURATION="10s" # Headless Locust run duration per combination (seconds).
+DURATION="60s" # Headless Locust run duration per combination (seconds).
 REPETITIONS_PER_TEST=1 # Number of times to repeat each combination for averaging or variance analysis.
 
 # Identifies the name of this file, then the directory containing said file, and sets PROJECT_DIR to that path.
