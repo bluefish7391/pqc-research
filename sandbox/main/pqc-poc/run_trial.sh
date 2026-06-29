@@ -1,6 +1,4 @@
 
-source ./start_containers.sh
-
 # Sets how fast Locust ramps to the target user count.
 # Can be adjusted later to implement warm up periods and avoid excessive load spikes.
 SPAWN_RATE_FN() { echo "$1"; }
