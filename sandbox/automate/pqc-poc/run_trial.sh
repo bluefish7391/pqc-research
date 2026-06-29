@@ -64,6 +64,14 @@ run_one_combination() {
 
     log "Locust detected! Starting container-level resource monitor..."
 
+    # Keep sampling on a fixed 1s schedule to avoid drift from command runtime.
+    local period_ns=1000000000
+    local next_tick
+    local now_ns
+    local sleep_ns
+    local missed
+    next_tick=$(date +%s%N)
+
     while true; do
       current_time=$(date '+%Y-%m-%d %H:%M:%S')
 
@@ -74,7 +82,17 @@ run_one_combination() {
             fi
           done
 
-      sleep 1
+      next_tick=$((next_tick + period_ns))
+      now_ns=$(date +%s%N)
+      sleep_ns=$((next_tick - now_ns))
+
+      if [ "$sleep_ns" -gt 0 ]; then
+        sleep "$(awk "BEGIN { printf \"%.6f\", ${sleep_ns}/1000000000 }")"
+      else
+        # If sampling overruns, skip ahead to the next aligned slot.
+        missed=$(( (-sleep_ns) / period_ns + 1 ))
+        next_tick=$((next_tick + missed * period_ns))
+      fi
     done
   ) &
   SAMPLER_PID=$!
