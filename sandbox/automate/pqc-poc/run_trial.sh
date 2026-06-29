@@ -44,14 +44,29 @@ run_one_combination() {
 
   # Start tshark in the background to capture packets on eth0, filtering for traffic to/from the oqs-nginx container on port 4433.
   # Write the captured packets to a pcap file named after the run_id in the PCAP_DIR.
+  # Start tshark and capture stderr so we can detect readiness text.
+  tshark_log="${RESULTS_DIR}/tshark_${run_id}.log"
   docker compose exec -T -u root oqs-locust \
-    tshark \
-      -i eth0 \
-      -f "host oqs-nginx and tcp port 4433" \
-      -w "/mnt/pcaps/${run_id}.pcap" \
-    &
-  TSHARK_PID=$! # Store the PID of the background tshark process so it can be terminated later after the locust run is complete.
-  sleep 1
+    tshark -i eth0 -f "host oqs-nginx and tcp port 4433" -w "/mnt/pcaps/${run_id}.pcap" \
+    > /dev/null 2> "${tshark_log}" &
+  TSHARK_PID=$!
+
+  # Wait up to 10s for tshark to report it is capturing.
+  timeout_s=10
+  elapsed=0
+  until grep -q "Capturing on" "${tshark_log}" 2>/dev/null; do
+    if ! kill -0 "${TSHARK_PID}" 2>/dev/null; then
+      log "ERROR: tshark exited before becoming ready"
+      return 1
+    fi
+    if [ "${elapsed}" -ge "${timeout_s}" ]; then
+      log "ERROR: tshark did not become ready within ${timeout_s}s"
+      kill "${TSHARK_PID}" 2>/dev/null || true
+      return 1
+    fi
+    sleep 0.1
+    elapsed=$((elapsed + 1))
+  done
 
   local cpu_log_file="${RESULTS_DIR}/cpu_matrix_${run_id}.csv"
   echo "Timestamp,Container,CPU_Pct,Mem_Usage,Net_IO_Rx_Tx" > "${cpu_log_file}"
