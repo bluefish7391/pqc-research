@@ -3,9 +3,15 @@ networks:
   ws-router-net:
     driver: bridge
     name:   ws-router-net
+    ipam:
+      config:
+        - subnet: 172.20.0.0/24
   lt-router-net:
     driver: bridge
     name:   lt-router-net
+    ipam:
+      config:
+        - subnet: 172.21.0.0/24
 
 services:
 
@@ -15,7 +21,8 @@ services:
     container_name: oqs-nginx
     hostname:       oqs-nginx        # Must match CN in server.crt
     networks:
-      - ws-router-net
+      ws-router-net:
+        ipv4_address: 172.20.0.10
     ports:
       - "443:4433"                    # Expose HTTPS to host for manual curl tests
     volumes:
@@ -43,15 +50,19 @@ services:
     image: alpine:latest
     container_name: router
     networks:
-      - lt-router-net
-      - ws-router-net
-    entrypoint: ["sleep", "infinity"]
+      ws-router-net:
+        ipv4_address: 172.20.0.2
+      lt-router-net:
+        ipv4_address: 172.21.0.2
+    volumes:
+      - ./router/entrypoint.sh:/entrypoint.sh:ro
+    entrypoint: ["/entrypoint.sh"]
     cap_add:
       - NET_ADMIN
     sysctls:
       - net.ipv4.ip_forward=1
     healthcheck:
-      test: ["CMD", "sh", "-c", "cat /proc/sys/net/ipv4/ip_forward | grep -q 1"]
+      test: ["CMD", "sh", "-c", "cat /proc/sys/net/ipv4/ip_forward | grep -q 1 && iptables -L FORWARD | grep -q ACCEPT"]
       interval:     1s
       timeout:      2s
       retries:      3
@@ -68,13 +79,16 @@ services:
     image: openquantumsafe/locust:latest
     container_name: oqs-locust
     networks:
-      - lt-router-net
+      lt-router-net:
+        ipv4_address: 172.21.0.10
     ports:
       - "8089:8089"                  # Unused in headless sweeps; left open for manual debugging
     volumes:
       - ./locust:/mnt/locust         # read-write: headless runs write --csv output here
       - ./certs:/certs:ro            # Available for optional CA pinning
       - ./data/pcaps:/mnt/pcaps        # read-write: tcpdump writes pcap files here
+    extra_hosts:
+      - "oqs-nginx:172.20.0.10"
     environment:
       # IMPORTANT: this must match nginx's ssl_ecdh_curve for the current
       # run, or the handshake fails (client/server must request the same

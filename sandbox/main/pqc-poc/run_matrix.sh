@@ -31,7 +31,7 @@ export MSYS_NO_PATHCONV=1
 # is used in output filenames and logs.
 declare -A KEM_GROUPS=(
   [classical]="X25519"
-  [hybrid]="X25519MLKEM768"
+  # [hybrid]="X25519MLKEM768"
 )
 
 USER_LEVELS=(1)
