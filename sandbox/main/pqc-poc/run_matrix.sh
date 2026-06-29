@@ -91,11 +91,6 @@ main() {
           for ((rep=1; rep<=REPETITIONS_PER_TEST; rep++)); do
             run_one_combination "${kem_label}" "${kem_value}" "${users}" "${latency}" "${loss}" "${rep}" "$((total_trials_performed + 1))"
             (( total_trials_performed += 1 ))
-
-            # Clear the terminal every 3 trials to keep the output manageable and avoid cluttering the screen with too many logs.
-            if [ $((total_trials_performed % 3)) -eq 0 ]; then
-              clear
-            fi
           done
         done
       done
