@@ -8,7 +8,7 @@ wait_for_healthy() {
   # Wait for the oqs-nginx container to report a healthy status via its healthcheck.
   # If it does not become healthy within max_wait seconds, logs are dumped and an error is returned.
 
-  local container="oqs-nginx"
+  local container="$1"
   local max_wait=60
   local waited=0
   log "Waiting for ${container} healthcheck..."
@@ -26,7 +26,7 @@ wait_for_healthy() {
 
     if (( waited >= max_wait )); then
       log "ERROR: ${container} did not become healthy within ${max_wait}s (status=${status})."
-      docker compose logs oqs-nginx || true
+      docker compose logs "${container}" || true
       return 1
     fi
     
@@ -112,8 +112,15 @@ start_up_containers() {
   render_nginx_conf "${kem_value}"
   docker compose up -d --build oqs-nginx 
 
-  if ! wait_for_healthy; then
+  if ! wait_for_healthy "oqs-nginx"; then
     log "ERROR: nginx did not become healthy for KEM group ${kem_label} (${kem_value})."
+    teardown
+    return 1
+  fi
+
+  docker compose up -d router
+  if ! wait_for_healthy "router"; then
+    log "ERROR: router did not become healthy for KEM group ${kem_label} (${kem_value})."
     teardown
     return 1
   fi
