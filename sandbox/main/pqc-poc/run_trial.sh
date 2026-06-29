@@ -50,8 +50,8 @@ run_one_combination() {
   TSHARK_PID=$!
 
   # Wait up to 10s for tshark to report it is capturing.
-  timeout_s=10
-  elapsed=0
+  local timeout_s=10
+  local elapsed=0
   until grep -q "Capturing on" "${tshark_log}" 2>/dev/null; do
     if ! kill -0 "${TSHARK_PID}" 2>/dev/null; then
       log "ERROR: tshark exited before becoming ready"
