@@ -35,8 +35,8 @@ declare -A KEM_GROUPS=(
 )
 
 USER_LEVELS=(1)
-LATENCIES=(0)
-LOSS_LEVELS=(0)
+RTTS=(0)         # Round-trip time in milliseconds. This is the artificial latency that will be introduced in the network emulation.
+LOSS_LEVELS=(0)  # Packet loss percentage. This is the percentage of packets that will be randomly dropped in the network emulation.
 
 DURATION="60s" # Headless Locust run duration per combination (seconds).
 REPETITIONS_PER_TEST=1 # Number of times to repeat each combination for averaging or variance analysis.
@@ -77,7 +77,7 @@ main() {
   # Ensure a clean slate before the sweep starts.
   teardown
 
-  local total_combinations=$(( ${#KEM_GROUPS[@]} * ${#USER_LEVELS[@]} * ${#LATENCIES[@]} * ${#LOSS_LEVELS[@]} ))
+  local total_combinations=$(( ${#KEM_GROUPS[@]} * ${#USER_LEVELS[@]} * ${#RTTS[@]} * ${#LOSS_LEVELS[@]} ))
   local total_trials_performed=0
   total_trials=$(( total_combinations * REPETITIONS_PER_TEST ))
 
@@ -86,10 +86,10 @@ main() {
     start_up_containers "${kem_label}" "${kem_value}"
 
     for users in "${USER_LEVELS[@]}"; do
-      for latency in "${LATENCIES[@]}"; do
+      for rtt in "${RTTS[@]}"; do
         for loss in "${LOSS_LEVELS[@]}"; do
           for ((rep=1; rep<=REPETITIONS_PER_TEST; rep++)); do
-            run_one_combination "${kem_label}" "${kem_value}" "${users}" "${latency}" "${loss}" "${rep}" "$((total_trials_performed + 1))"
+            run_one_combination "${kem_label}" "${kem_value}" "${users}" "${rtt}" "${loss}" "${rep}" "$((total_trials_performed + 1))"
             (( total_trials_performed += 1 ))
           done
         done

@@ -25,26 +25,26 @@ run_one_combination() {
   local kem_label="$1"
   local kem_value="$2"
   local users="$3"
-  local latency_ms="$4"
+  local rtt_ms="$4"
   local loss_pct="$5"
   local repetition="$6"
   local trial_number="$7"
   local spawn_rate="$(SPAWN_RATE_FN "${users}")"
 
-  local run_id="${kem_label}_u${users}_lat${latency_ms}ms_loss${loss_pct}pct_rep${repetition}"
+  local run_id="${kem_label}_u${users}_rtt${rtt_ms}ms_loss${loss_pct}pct_rep${repetition}"
   log "════════════════════════════════════════════════════════════"
-  log "RUN(${trial_number}/${total_trials}): kem=${kem_label} (${kem_value})  users=${users}  latency=${latency_ms}ms  loss=${loss_pct}%  duration=${DURATION}"
+  log "RUN(${trial_number}/${total_trials}): kem=${kem_label} (${kem_value})  users=${users}  rtt=${rtt_ms}ms  loss=${loss_pct}%  duration=${DURATION}"
   log "════════════════════════════════════════════════════════════"
 
   log "Resetting network conditions..."
   docker compose exec -T -u root router tc qdisc del dev eth0 root netem || true
   docker compose exec -T -u root router tc qdisc del dev eth1 root netem || true
 
-  log "Injecting network conditions: ${latency_ms}ms delay, ${loss_pct}% loss..."
+  log "Injecting network conditions: ${rtt_ms}ms delay, ${loss_pct}% loss..."
   # The tc command adds a queuing discipline (qdisc) to the eth0 network interface of the router container, introducing artificial latency and packet loss.
   # especially with packet loss.
-  docker compose exec -T -u root router tc qdisc add dev eth0 root netem delay "${latency_ms}ms" loss "${loss_pct}%"
-  docker compose exec -T -u root router tc qdisc add dev eth1 root netem delay "${latency_ms}ms" loss "${loss_pct}%"
+  docker compose exec -T -u root router tc qdisc add dev eth0 root netem delay "$((rtt_ms / 2))ms" loss "${loss_pct}%"
+  docker compose exec -T -u root router tc qdisc add dev eth1 root netem delay "$((rtt_ms / 2))ms" loss "${loss_pct}%"
 
   # Start tshark in the background to capture packets on eth0, filtering for traffic to/from the oqs-nginx container on port 4433.
   # Write the captured packets to a pcap file named after the run_id in the PCAP_DIR.
