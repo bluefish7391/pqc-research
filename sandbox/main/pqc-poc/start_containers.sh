@@ -64,6 +64,25 @@ EOF
   echo "${openssl_bin}"
 }
 
+validate_forced_routing() {
+  # Validate that the oqs-locust and oqs-nginx containers are routing traffic through the router container as expected.
+  # This is a preflight check to ensure that the network emulation (tc-netem) and packet capture (tshark) will see both directions of each TCP flow.
+
+  log "Validating forced routing through router container..."
+
+  if ! docker compose exec -T oqs-locust ip route show 172.20.0.0/24 | grep -q "172.21.0.2"; then
+    log "ERROR: oqs-locust does not have a static route to oqs-nginx via router. Traffic may bypass router and tc-netem."
+    return 1
+  fi
+
+  if ! docker compose exec -T oqs-nginx ip route show 172.21.0.0/24 | grep -q "172.20.0.2"; then
+    log "ERROR: oqs-nginx does not have a static route to oqs-locust via router. Traffic may bypass router and tc-netem."
+    return 1
+  fi
+
+  log "Forced routing validation OK."
+}
+
 validate_handshake() {
   # Validate that the oqs-locust client can successfully perform a TLS handshake with the oqs-nginx server using the specified KEM group.
   # This is a preflight check to ensure that the server and client are configured correctly before running the load test.
@@ -134,6 +153,12 @@ start_up_containers() {
   docker compose exec -T -u root oqs-locust  ip route add 172.20.0.0/24 via 172.21.0.2
   docker compose exec -T -u root oqs-nginx   ip route add 172.21.0.0/24 via 172.20.0.2
 
+  if ! validate_forced_routing; then
+    log "ERROR: forced routing validation failed for KEM group ${kem_label} (${kem_value})."
+    teardown
+    return 1
+  fi
+  
   if ! validate_handshake "${kem_label}" "${kem_value}"; then
     log "ERROR: handshake validation failed for KEM group ${kem_label} (${kem_value})."
     teardown
