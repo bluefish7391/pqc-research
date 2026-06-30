@@ -61,6 +61,7 @@ services:
     entrypoint: ["/entrypoint.sh"]
     cap_add:
       - NET_ADMIN
+      - NET_RAW
     sysctls:
       - net.ipv4.ip_forward=1
     healthcheck:
@@ -97,6 +98,8 @@ services:
       # `docker compose up` for each combination — do not leave it static.
       - OQS_KEM_GROUP=${OQS_KEM_GROUP:-X25519MLKEM768}
     entrypoint: ["sleep", "infinity"]   # keep container alive; run_matrix.sh execs locust into it
+    cap_add:
+      - NET_ADMIN                        # required to add static route via router container
     depends_on:
       oqs-nginx:
         condition: service_healthy

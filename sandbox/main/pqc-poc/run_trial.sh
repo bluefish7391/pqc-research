@@ -40,7 +40,7 @@ run_one_combination() {
   docker compose exec -T -u root router tc qdisc del dev eth0 root netem || true
   docker compose exec -T -u root router tc qdisc del dev eth1 root netem || true
 
-  log "Injecting network conditions: ${rtt_ms}ms delay, ${loss_pct}% loss..."
+  log "Injecting network conditions: ${rtt_ms}ms round-trip delay, ${loss_pct}% loss..."
   # The tc command adds a queuing discipline (qdisc) to the eth0 network interface of the router container, introducing artificial latency and packet loss.
   # especially with packet loss.
   docker compose exec -T -u root router tc qdisc add dev eth0 root netem delay "$((rtt_ms / 2))ms" loss "${loss_pct}%"
@@ -50,8 +50,12 @@ run_one_combination() {
   # Write the captured packets to a pcap file named after the run_id in the PCAP_DIR.
   # Start tshark and capture stderr so we can detect readiness text.
   tshark_log="${RESULTS_DIR}/tshark_${run_id}.log"
+  NGINX_IFACE=$(docker compose exec -T -u root router \
+    sh -c "ip -o addr show | awk '/172\\.20\\.0\\.2/{print \$2}'" \
+    | tr -d '\r')
   docker compose exec -T -u root router \
-    tshark -i any -f "host 172.20.0.10 and tcp port 4433" -w "/mnt/pcaps/${run_id}.pcap" \
+    tshark -i "${NGINX_IFACE}" -f "host 172.20.0.10 and tcp port 4433" \
+      -w "/mnt/pcaps/${run_id}.pcap" \
     > /dev/null 2> "${tshark_log}" &
   TSHARK_PID=$!
 

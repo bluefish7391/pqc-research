@@ -127,6 +127,11 @@ start_up_containers() {
 
   docker compose up -d oqs-locust
 
+  # Route traffic to the nginx subnet (172.20.0.0/24) through the router container
+  # rather than the Docker bridge default gateway. Without this, all locust→nginx
+  # traffic bypasses the router entirely, making tc-netem and tshark ineffective.
+  docker compose exec -T oqs-locust ip route add 172.20.0.0/24 via 172.21.0.2
+
   if ! validate_handshake "${kem_label}" "${kem_value}"; then
     log "ERROR: handshake validation failed for KEM group ${kem_label} (${kem_value})."
     teardown
