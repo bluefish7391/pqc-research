@@ -15,7 +15,7 @@ extract_pcap_metrics() {
   local out="${RESULTS_DIR}/pcap_summary_${run_id}.csv"
 
   # Use tshark to read the pcap file and generate a summary of TCP retransmissions, writing the output to a CSV file in the results directory.
-  docker compose exec -T oqs-locust \
+  docker compose exec -T router \
     tshark -r "${pcap}" -q \
       -z "io,stat,0,tcp.len,tcp.analysis.retransmission" \
     > "${out}" 2>&1 || log "WARNING: tshark summary failed for ${run_id}"
@@ -50,7 +50,7 @@ run_one_combination() {
   # Write the captured packets to a pcap file named after the run_id in the PCAP_DIR.
   # Start tshark and capture stderr so we can detect readiness text.
   tshark_log="${RESULTS_DIR}/tshark_${run_id}.log"
-  docker compose exec -T -u root oqs-locust \
+  docker compose exec -T -u root router \
     tshark -i eth0 -f "host oqs-nginx and tcp port 4433" -w "/mnt/pcaps/${run_id}.pcap" \
     > /dev/null 2> "${tshark_log}" &
   TSHARK_PID=$!
@@ -137,7 +137,7 @@ run_one_combination() {
   # Terminate the tshark monitor inside the container cleanly by sending a SIGINT signal, which allows tshark to flush its buffers 
   # and write the pcap file properly. This in turn kills the docker compose exec command, which is why the wait command is used to
   # ensure that the tshark process has exited before proceeding.
-  docker compose exec -T -u root oqs-locust pkill -SIGINT tshark 2>/dev/null || true
+  docker compose exec -T -u root router pkill -SIGINT tshark 2>/dev/null || true
   wait $TSHARK_PID 2>/dev/null || true
 
   extract_pcap_metrics "${run_id}"

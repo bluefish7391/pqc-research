@@ -57,6 +57,7 @@ services:
         ipv4_address: 172.21.0.2
     volumes:
       - ./router/entrypoint.sh:/entrypoint.sh:ro
+      - ./data/pcaps:/mnt/pcaps        # read-write: tcpdump writes pcap files here
     entrypoint: ["/entrypoint.sh"]
     cap_add:
       - NET_ADMIN
@@ -87,7 +88,6 @@ services:
     volumes:
       - ./locust:/mnt/locust         # read-write: headless runs write --csv output here
       - ./certs:/certs:ro            # Available for optional CA pinning
-      - ./data/pcaps:/mnt/pcaps        # read-write: tcpdump writes pcap files here
     extra_hosts:
       - "oqs-nginx:172.20.0.10"
     environment:
