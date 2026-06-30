@@ -47,7 +47,8 @@ services:
     restart: on-failure
 
   router:
-    image: alpine:latest
+    build:
+      context: ./router
     container_name: router
     networks:
       ws-router-net:

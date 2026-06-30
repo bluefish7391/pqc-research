@@ -127,16 +127,6 @@ start_up_containers() {
 
   docker compose up -d --build oqs-locust
 
-  # The oqs-locust container is based on Alpine Linux, which uses the 'apk' package manager. Due to the minimalist nature of the locust image,
-  # it lacks the security certificates needed to validate HTTPS connections. To get around this, the alpine respositories file is modified by
-  # replacing 'https://' with 'http://', allowing the package manager to fetch packages over HTTP. Then, the necessary packages for network 
-  # emulation and packet capture are installed.
-
-  # It is safe to use HTTP here because while the requests and responses are unsecured by TLS, the Alpine package repositories are signed, and 
-  # the package manager will verify the signatures of the packages it downloads.
-  docker compose exec -T -u root oqs-locust sed -i 's/https:\/\//http:\/\//g' /etc/apk/repositories
-  docker compose exec -T -u root oqs-locust apk add --no-cache iproute2 tshark # --no-cache avoids caching the package index, saving space in the container.
-
   if ! validate_handshake "${kem_label}" "${kem_value}"; then
     log "ERROR: handshake validation failed for KEM group ${kem_label} (${kem_value})."
     teardown
