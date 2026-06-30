@@ -110,7 +110,7 @@ start_up_containers() {
   # Only the oqs-nginx service needs to be rebuilt, as the oqs-locust service determines the KEM group at runtime via the OQS_KEM_GROUP environment variable.
   # On the other hand, the nginx.conf file is baked into the oqs-nginx image at build time, so it must be rebuilt for each KEM group.
   render_nginx_conf "${kem_value}"
-  docker compose up -d --build oqs-nginx 
+  docker compose up -d oqs-nginx 
 
   if ! wait_for_healthy "oqs-nginx"; then
     log "ERROR: nginx did not become healthy for KEM group ${kem_label} (${kem_value})."
@@ -118,14 +118,14 @@ start_up_containers() {
     return 1
   fi
 
-  docker compose up -d router
+  docker compose up -d --build router
   if ! wait_for_healthy "router"; then
     log "ERROR: router did not become healthy for KEM group ${kem_label} (${kem_value})."
     teardown
     return 1
   fi
 
-  docker compose up -d --build oqs-locust
+  docker compose up -d oqs-locust
 
   if ! validate_handshake "${kem_label}" "${kem_value}"; then
     log "ERROR: handshake validation failed for KEM group ${kem_label} (${kem_value})."
