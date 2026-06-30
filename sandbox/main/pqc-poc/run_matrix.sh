@@ -31,14 +31,14 @@ export MSYS_NO_PATHCONV=1
 # is used in output filenames and logs.
 declare -A KEM_GROUPS=(
   [classical]="X25519"
-  # [hybrid]="X25519MLKEM768"
+  [hybrid]="X25519MLKEM768"
 )
 
 USER_LEVELS=(1)
 RTTS=(0)         # Round-trip time in milliseconds. This is the artificial latency that will be introduced in the network emulation.
 LOSS_LEVELS=(0)  # Packet loss percentage. This is the percentage of packets that will be randomly dropped in the network emulation.
 
-DURATION="60s" # Headless Locust run duration per combination (seconds).
+DURATION="10s" # Headless Locust run duration per combination (seconds).
 REPETITIONS_PER_TEST=1 # Number of times to repeat each combination for averaging or variance analysis.
 
 # Identifies the name of this file, then the directory containing said file, and sets PROJECT_DIR to that path.
@@ -96,7 +96,7 @@ main() {
       done
     done
 
-    teardown
+    # teardown
 
   done
 

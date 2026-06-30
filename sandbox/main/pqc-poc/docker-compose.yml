@@ -38,6 +38,8 @@ services:
         reservations:
           cpus:   "0.25"
           memory: 64M
+    cap_add:
+      - NET_ADMIN                        # required to add static route via router container
     healthcheck:
       test: ["CMD", "nginx", "-t"]
       interval:     1s
