@@ -37,21 +37,21 @@ run_one_combination() {
   log "════════════════════════════════════════════════════════════"
 
   log "Resetting network conditions..."
-  docker compose exec -T -u root oqs-locust tc qdisc del dev eth0 root netem || true
+  docker compose exec -T -u root router tc qdisc del dev eth0 root netem || true
+  docker compose exec -T -u root router tc qdisc del dev eth1 root netem || true
 
   log "Injecting network conditions: ${latency_ms}ms delay, ${loss_pct}% loss..."
-  # The tc command adds a queuing discipline (qdisc) to the eth0 network interface of the oqs-locust container, introducing artificial latency and packet loss.
-  # This only affects the outgoing traffic from the locust container to the nginx container, which is unrealistic, but it is a simple way to simulate network 
-  # conditions for testing purposes. For actual experimental data, traffic coming from the nginx container to the locust container should also be affected,
-  # especially with packet loss. This will be resolved in the three-node setup.
-  docker compose exec -T -u root oqs-locust tc qdisc add dev eth0 root netem delay "${latency_ms}ms" loss "${loss_pct}%"
+  # The tc command adds a queuing discipline (qdisc) to the eth0 network interface of the router container, introducing artificial latency and packet loss.
+  # especially with packet loss.
+  docker compose exec -T -u root router tc qdisc add dev eth0 root netem delay "${latency_ms}ms" loss "${loss_pct}%"
+  docker compose exec -T -u root router tc qdisc add dev eth1 root netem delay "${latency_ms}ms" loss "${loss_pct}%"
 
   # Start tshark in the background to capture packets on eth0, filtering for traffic to/from the oqs-nginx container on port 4433.
   # Write the captured packets to a pcap file named after the run_id in the PCAP_DIR.
   # Start tshark and capture stderr so we can detect readiness text.
   tshark_log="${RESULTS_DIR}/tshark_${run_id}.log"
   docker compose exec -T -u root router \
-    tshark -i eth0 -f "host oqs-nginx and tcp port 4433" -w "/mnt/pcaps/${run_id}.pcap" \
+    tshark -i any -f "host 172.20.0.10 and tcp port 4433" -w "/mnt/pcaps/${run_id}.pcap" \
     > /dev/null 2> "${tshark_log}" &
   TSHARK_PID=$!
 
