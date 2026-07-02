@@ -126,6 +126,13 @@ run_one_combination() {
   ) &
   SAMPLER_PID=$!
 
+  declare -A lt_throttle_stats_before
+  declare -A rt_throttle_stats_before
+  declare -A ws_throttle_stats_before
+  record_throttle_stats_for_container "oqs-locust" lt_throttle_stats_before
+  record_throttle_stats_for_container "router" rt_throttle_stats_before
+  record_throttle_stats_for_container "oqs-nginx" ws_throttle_stats_before
+
   log "Starting headless Locust run..."
   docker compose exec -T oqs-locust \
     locust \
@@ -140,6 +147,13 @@ run_one_combination() {
       --csv-full-history \
     || log "WARNING: locust exited non-zero for ${run_id} (check stats before discarding the run)"
 
+  declare -A lt_throttle_stats_after
+  declare -A rt_throttle_stats_after
+  declare -A ws_throttle_stats_after
+  record_throttle_stats_for_container "oqs-locust" lt_throttle_stats_after
+  record_throttle_stats_for_container "router" rt_throttle_stats_after
+  record_throttle_stats_for_container "oqs-nginx" ws_throttle_stats_after
+
   kill "${SAMPLER_PID}" 2>/dev/null || true
   pkill -P "${SAMPLER_PID}" 2>/dev/null || true
   wait "${SAMPLER_PID}" 2>/dev/null || true
@@ -151,6 +165,7 @@ run_one_combination() {
   wait $TSHARK_PID 2>/dev/null || true
 
   extract_pcap_metrics "${run_id}"
+  write_throttle_stats "${run_id}" lt_throttle_stats_before lt_throttle_stats_after rt_throttle_stats_before rt_throttle_stats_after ws_throttle_stats_before ws_throttle_stats_after
 
   # Checks if any CSV output files match the the expected pattern before attempting to move them to the results directory.
   if compgen -G "${LOCUST_OUT_DIR}/results_${run_id}*" > /dev/null; then
@@ -159,4 +174,41 @@ run_one_combination() {
   else
     log "WARNING: no CSV output found for ${run_id} — check locust container logs."
   fi
+}
+
+record_throttle_stats_for_container() {
+  local container_name="$1"
+  local -n stats_array_ref="$2"
+
+  while read -r key value; do
+    if [[ "${key}" == "nr_periods" || "${key}" == "nr_throttled" || "${key}" == "throttled_usec" ]]; then
+      stats_array_ref["${key}"]="${value}"
+    fi
+  done < <(docker compose exec -T "${container_name}" cat /sys/fs/cgroup/cpu.stat)
+}
+
+write_throttle_stats() {
+  local run_id="$1"
+  local out_file="${RESULTS_DIR}/throttle_stats.csv"
+
+  local -n lt_before="$2"
+  local -n lt_after="$3"
+  local -n rt_before="$4"
+  local -n rt_after="$5"
+  local -n ws_before="$6"
+  local -n ws_after="$7"
+
+  local lt_nrp_delta=$((lt_after["nr_periods"] - lt_before["nr_periods"]))
+  local lt_nrt_delta=$((lt_after["nr_throttled"] - lt_before["nr_throttled"]))
+  local lt_tu_delta=$((lt_after["throttled_usec"] - lt_before["throttled_usec"]))
+
+  local rt_nrp_delta=$((rt_after["nr_periods"] - rt_before["nr_periods"]))
+  local rt_nrt_delta=$((rt_after["nr_throttled"] - rt_before["nr_throttled"]))
+  local rt_tu_delta=$((rt_after["throttled_usec"] - rt_before["throttled_usec"]))
+
+  local ws_nrp_delta=$((ws_after["nr_periods"] - ws_before["nr_periods"]))
+  local ws_nrt_delta=$((ws_after["nr_throttled"] - ws_before["nr_throttled"]))
+  local ws_tu_delta=$((ws_after["throttled_usec"] - ws_before["throttled_usec"]))
+
+  echo "${run_id},${lt_nrp_delta},${lt_nrt_delta},${lt_tu_delta},${rt_nrp_delta},${rt_nrt_delta},${rt_tu_delta},${ws_nrp_delta},${ws_nrt_delta},${ws_tu_delta}" >> "${out_file}"
 }

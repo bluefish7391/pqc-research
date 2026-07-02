@@ -54,6 +54,7 @@ PCAP_DIR="${PROJECT_DIR}/data/pcaps"
 # as these are untracked by git and may not be present in a fresh clone.
 mkdir -p "${RESULTS_DIR}" "${PCAP_DIR}" "${PROJECT_DIR}/logs"
 touch "${PROJECT_DIR}/logs/run_matrix.log"
+echo "run_id,lt_nrp_delta,lt_nrt_delta,lt_tu_delta,rt_nrp_delta,rt_nrt_delta,rt_tu_delta,ws_nrp_delta,ws_nrt_delta,ws_tu_delta" > "${RESULTS_DIR}/throttle_stats.csv"
 
 # == Helpers ==================================================================
 
