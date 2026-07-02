@@ -50,12 +50,18 @@ run_one_combination() {
   # Write the captured packets to a pcap file named after the run_id in the PCAP_DIR.
   # Start tshark and capture stderr so we can detect readiness text.
   tshark_log="${RESULTS_DIR}/tshark_${run_id}.log"
+  local pcap_path="/mnt/pcaps/${run_id}.pcap"
   NGINX_IFACE=$(docker compose exec -T -u root router \
     sh -c "ip -o addr show | awk '/172\\.20\\.0\\.2/{print \$2}'" \
     | tr -d '\r')
+
+  # tshark may drop privileges after startup; pre-create a writable output file.
+  docker compose exec -T -u root router \
+    sh -c "mkdir -p /mnt/pcaps && : > '${pcap_path}' && chmod 666 '${pcap_path}'"
+
   docker compose exec -T -u root router \
     tshark -i "${NGINX_IFACE}" -f "host 172.20.0.10 and tcp port 4433" \
-      -w "/mnt/pcaps/${run_id}.pcap" \
+      -w "${pcap_path}" \
     > /dev/null 2> "${tshark_log}" &
   TSHARK_PID=$!
 
