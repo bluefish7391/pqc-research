@@ -1,6 +1,5 @@
 main() {
-    rm -rf ./pcaps/*
-    rm -rf ./results/*
+    rm -rf ./collection_*/
     rm -rf ./figures/*
 
     echo "Data cleared."

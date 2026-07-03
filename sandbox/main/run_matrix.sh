@@ -46,13 +46,16 @@ PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 NGINX_TMPL="${PROJECT_DIR}/nginx/nginx.conf.tmpl"
 NGINX_CONF="${PROJECT_DIR}/nginx/nginx.conf"
-RESULTS_DIR="${PROJECT_DIR}/data/results"
+
+DATA_DIR="${PROJECT_DIR}/data"
+COLLECTION_DIR="${DATA_DIR}/collection_$(date '+%Y%m%d_%H%M%S')"
+RESULTS_DIR="${COLLECTION_DIR}/results"
+export PCAP_DIR="${COLLECTION_DIR}/pcaps" # Needs to be exported so that the compose file can access it as an environment variable for volume mounting.
 LOCUST_OUT_DIR="${PROJECT_DIR}/locust"
-PCAP_DIR="${PROJECT_DIR}/data/pcaps"
 
 # Create directories for results, pcaps, and logs if they don't exist yet,
 # as these are untracked by git and may not be present in a fresh clone.
-mkdir -p "${RESULTS_DIR}" "${PCAP_DIR}" "${PROJECT_DIR}/logs"
+mkdir -p "${COLLECTION_DIR}" "${RESULTS_DIR}" "${PCAP_DIR}" "${PROJECT_DIR}/logs"
 touch "${PROJECT_DIR}/logs/run_matrix.log"
 
 # == Helpers ==================================================================
