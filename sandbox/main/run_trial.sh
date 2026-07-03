@@ -185,6 +185,12 @@ record_throttle_stats_for_container() {
       stats_array_ref["${key}"]="${value}"
     fi
   done < <(docker compose exec -T "${container_name}" cat /sys/fs/cgroup/cpu.stat)
+  cpu_stat_read_pid=$!
+
+  if ! wait "${cpu_stat_read_pid}"; then
+    log "ERROR: Failed to read CPU throttle stats for container ${container_name}"
+    return 1
+  fi
 }
 
 write_throttle_stats() {
