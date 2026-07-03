@@ -36,7 +36,7 @@ init_throttle_stats_csv() {
       if ! metric_suffix="$(throttle_metric_suffix "${metric}")"; then
         return 1
       fi
-      header+=",${alias}_${metric_suffix}_delta"
+      header+=",${alias}_${metric_suffix}_before,${alias}_${metric_suffix}_after"
     done
   done
 
@@ -306,9 +306,8 @@ write_throttle_stats() {
         log "ERROR: Missing metric ${metric} for alias ${alias} (run ${run_id})"
         return 1
       fi
-
-      delta=$((after_stats_ref[${metric}] - before_stats_ref[${metric}]))
-      row+=",${delta}"
+      
+      row+=",${before_stats_ref[${metric}]},${after_stats_ref[${metric}]}"
     done
   done
 
