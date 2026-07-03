@@ -8,7 +8,7 @@ wait_for_healthy() {
   # Wait for the oqs-nginx container to report a healthy status via its healthcheck.
   # If it does not become healthy within max_wait seconds, logs are dumped and an error is returned.
 
-  local container="oqs-nginx"
+  local container="$1"
   local max_wait=60
   local waited=0
   log "Waiting for ${container} healthcheck..."
@@ -26,7 +26,7 @@ wait_for_healthy() {
 
     if (( waited >= max_wait )); then
       log "ERROR: ${container} did not become healthy within ${max_wait}s (status=${status})."
-      docker compose logs oqs-nginx || true
+      docker compose logs "${container}" || true
       return 1
     fi
     
@@ -62,6 +62,25 @@ EOF
     | tr -d '\r' \
     | tail -n1)
   echo "${openssl_bin}"
+}
+
+validate_forced_routing() {
+  # Validate that the oqs-locust and oqs-nginx containers are routing traffic through the router container as expected.
+  # This is a preflight check to ensure that the network emulation (tc-netem) and packet capture (tshark) will see both directions of each TCP flow.
+
+  log "Validating forced routing through router container..."
+
+  if ! docker compose exec -T oqs-locust ip route show 172.20.0.0/24 | grep -q "172.21.0.2"; then
+    log "ERROR: oqs-locust does not have a static route to oqs-nginx via router. Traffic may bypass router and tc-netem."
+    return 1
+  fi
+
+  if ! docker compose exec -T oqs-nginx ip route show 172.21.0.0/24 | grep -q "172.20.0.2"; then
+    log "ERROR: oqs-nginx does not have a static route to oqs-locust via router. Traffic may bypass router and tc-netem."
+    return 1
+  fi
+
+  log "Forced routing validation OK."
 }
 
 validate_handshake() {
@@ -110,26 +129,36 @@ start_up_containers() {
   # Only the oqs-nginx service needs to be rebuilt, as the oqs-locust service determines the KEM group at runtime via the OQS_KEM_GROUP environment variable.
   # On the other hand, the nginx.conf file is baked into the oqs-nginx image at build time, so it must be rebuilt for each KEM group.
   render_nginx_conf "${kem_value}"
-  docker compose up -d --build oqs-nginx 
+  docker compose up -d oqs-nginx 
 
-  if ! wait_for_healthy; then
+  if ! wait_for_healthy "oqs-nginx"; then
     log "ERROR: nginx did not become healthy for KEM group ${kem_label} (${kem_value})."
     teardown
     return 1
   fi
 
-  docker compose up -d --build oqs-locust
+  docker compose up -d --build router
+  if ! wait_for_healthy "router"; then
+    log "ERROR: router did not become healthy for KEM group ${kem_label} (${kem_value})."
+    teardown
+    return 1
+  fi
 
-  # The oqs-locust container is based on Alpine Linux, which uses the 'apk' package manager. Due to the minimalist nature of the locust image,
-  # it lacks the security certificates needed to validate HTTPS connections. To get around this, the alpine respositories file is modified by
-  # replacing 'https://' with 'http://', allowing the package manager to fetch packages over HTTP. Then, the necessary packages for network 
-  # emulation and packet capture are installed.
+  docker compose up -d oqs-locust
 
-  # It is safe to use HTTP here because while the requests and responses are unsecured by TLS, the Alpine package repositories are signed, and 
-  # the package manager will verify the signatures of the packages it downloads.
-  docker compose exec -T -u root oqs-locust sed -i 's/https:\/\//http:\/\//g' /etc/apk/repositories
-  docker compose exec -T -u root oqs-locust apk add --no-cache iproute2 tshark # --no-cache avoids caching the package index, saving space in the container.
+  # Force symmetric routing through the router container so that both directions
+  # of each TCP flow pass through the router's eth0/eth1 interfaces. Without this,
+  # each container routes return traffic via the Docker bridge default gateway,
+  # bypassing the router and making tc-netem and tshark only see one direction.
+  docker compose exec -T -u root oqs-locust  ip route add 172.20.0.0/24 via 172.21.0.2
+  docker compose exec -T -u root oqs-nginx   ip route add 172.21.0.0/24 via 172.20.0.2
 
+  if ! validate_forced_routing; then
+    log "ERROR: forced routing validation failed for KEM group ${kem_label} (${kem_value})."
+    teardown
+    return 1
+  fi
+  
   if ! validate_handshake "${kem_label}" "${kem_value}"; then
     log "ERROR: handshake validation failed for KEM group ${kem_label} (${kem_value})."
     teardown

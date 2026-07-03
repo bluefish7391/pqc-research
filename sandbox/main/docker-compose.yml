@@ -1,17 +1,17 @@
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-#  KD Protocol Benchmarking PoC — Docker Compose
-#  Signature: ECDSA P-256 (classical) | KEM groups: classical / hybrid / pure-PQ
-#  KEM group is selected by run_matrix.sh, which renders nginx/nginx.conf
-#  from nginx/nginx.conf.tmpl before each `docker compose up`.
-#
-#  Usage: ./run_matrix.sh   (do not `docker compose up` directly for sweeps —
-#  nginx.conf will not reflect the intended KEM group unless rendered first)
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 networks:
-  pqc-net:
+  ws-router-net:
     driver: bridge
-    name:   pqc-net
+    name:   ws-router-net
+    ipam:
+      config:
+        - subnet: 172.20.0.0/24
+  lt-router-net:
+    driver: bridge
+    name:   lt-router-net
+    ipam:
+      config:
+        - subnet: 172.21.0.0/24
 
 services:
 
@@ -21,7 +21,8 @@ services:
     container_name: oqs-nginx
     hostname:       oqs-nginx        # Must match CN in server.crt
     networks:
-      - pqc-net
+      ws-router-net:
+        ipv4_address: 172.20.0.10
     ports:
       - "443:4433"                    # Expose HTTPS to host for manual curl tests
     volumes:
@@ -37,8 +38,36 @@ services:
         reservations:
           cpus:   "0.25"
           memory: 64M
+    cap_add:
+      - NET_ADMIN                        # required to add static route via router container
     healthcheck:
       test: ["CMD", "nginx", "-t"]
+      interval:     1s
+      timeout:      2s
+      retries:      3
+      start_period: 3s
+    restart: on-failure
+
+  router:
+    build:
+      context: ./router
+    container_name: router
+    networks:
+      ws-router-net:
+        ipv4_address: 172.20.0.2
+      lt-router-net:
+        ipv4_address: 172.21.0.2
+    volumes:
+      - ./router/entrypoint.sh:/entrypoint.sh:ro
+      - ./data/pcaps:/mnt/pcaps        # read-write: tcpdump writes pcap files here
+    entrypoint: ["/entrypoint.sh"]
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    sysctls:
+      - net.ipv4.ip_forward=1
+    healthcheck:
+      test: ["CMD", "sh", "-c", "cat /proc/sys/net/ipv4/ip_forward | grep -q 1 && iptables -L FORWARD | grep -q ACCEPT"]
       interval:     1s
       timeout:      2s
       retries:      3
@@ -55,27 +84,28 @@ services:
     image: openquantumsafe/locust:latest
     container_name: oqs-locust
     networks:
-      - pqc-net
+      lt-router-net:
+        ipv4_address: 172.21.0.10
     ports:
       - "8089:8089"                  # Unused in headless sweeps; left open for manual debugging
     volumes:
       - ./locust:/mnt/locust         # read-write: headless runs write --csv output here
       - ./certs:/certs:ro            # Available for optional CA pinning
-      - ./data/pcaps:/mnt/pcaps        # read-write: tcpdump writes pcap files here
-    cap_add:
-      - NET_ADMIN
+    extra_hosts:
+      - "oqs-nginx:172.20.0.10"
     environment:
       # IMPORTANT: this must match nginx's ssl_ecdh_curve for the current
       # run, or the handshake fails (client/server must request the same
       # group). run_matrix.sh sets this to the matching value before
       # `docker compose up` for each combination — do not leave it static.
       - OQS_KEM_GROUP=${OQS_KEM_GROUP:-X25519MLKEM768}
-      # ── Traffic shape knobs ──────────────────────────────────────────
-      - WAIT_MIN=1.0                    # min seconds between requests per user
-      - WAIT_MAX=3.0                    # max seconds between requests per user
     entrypoint: ["sleep", "infinity"]   # keep container alive; run_matrix.sh execs locust into it
+    cap_add:
+      - NET_ADMIN                        # required to add static route via router container
     depends_on:
       oqs-nginx:
+        condition: service_healthy
+      router:
         condition: service_healthy
     cpuset: "1"
     deploy:

@@ -28,8 +28,6 @@ HTTP_REQUEST = (
 ).encode("ascii")
 
 # Define a custom Locust user class that performs TLS handshakes using OpenSSL's s_client.
-# The first user to start will perform a "preload" handshake to warm up the OQS provider
-# library, and subsequent users will skip this step.
 class TLSHandshakeUser(User):
     wait_time = constant(WAIT_TIME)
 
