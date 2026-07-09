@@ -59,7 +59,7 @@ services:
         ipv4_address: 172.21.0.2
     volumes:
       - ./router/entrypoint.sh:/entrypoint.sh:ro
-      - ${PCAP_DIR}:/mnt/pcaps:rw   # read-write: tcpdump writes pcap files here
+      - ${PCAP_DIR:-./data/pcaps}:/mnt/pcaps:rw   # default path for interactive terminal compose commands when PCAP_DIR is unset
     entrypoint: ["/entrypoint.sh"]
     cap_add:
       - NET_ADMIN
