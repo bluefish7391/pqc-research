@@ -68,7 +68,7 @@ init_throttle_stats_csv
 
 teardown() {
   log "Tearing down (docker compose down -v)..."
-  docker compose down -v --remove-orphans || true
+  docker compose down -v --remove-orphans || log "Warning: docker compose down failed. Continuing..."
 }
 
 main() {
