@@ -54,17 +54,30 @@ DATA_DIR="${PROJECT_DIR}/data"
 COLLECTION_DIR="${DATA_DIR}/collection_$(date '+%Y%m%d_%H%M%S')"
 RESULTS_DIR="${COLLECTION_DIR}/results"
 export PCAP_DIR="${COLLECTION_DIR}/pcaps" # Needs to be exported so that the compose file can access it as an environment variable for volume mounting.
+LOG_FILE="${COLLECTION_DIR}/run_matrix.log"
 LOCUST_OUT_DIR="${PROJECT_DIR}/locust"
 
 # Create directories for results, pcaps, and logs if they don't exist yet,
 # as these are untracked by git and may not be present in a fresh clone.
-mkdir -p "${COLLECTION_DIR}" "${RESULTS_DIR}" "${PCAP_DIR}" "${PROJECT_DIR}/logs"
-touch "${PROJECT_DIR}/logs/run_matrix.log"
+mkdir -p "${COLLECTION_DIR}" "${RESULTS_DIR}" "${PCAP_DIR}"
+touch "${LOG_FILE}" "${COLLECTION_DIR}/run_info.txt"
+
+# Write run info (levels of each independent variable tested) to a file for later reference.
+cat << EOF >> "${COLLECTION_DIR}/run_info.txt"
+Run info for matrix sweep started at $(date '+%Y-%m-%d %H:%M:%S')
+KEM groups: ${!KEM_GROUPS[*]}
+User levels: ${USER_LEVELS[*]}
+RTTs (ms): ${RTTS[*]}
+Loss levels (%): ${LOSS_LEVELS[*]}
+Duration per run: ${DURATION}
+Repetitions per test: ${REPETITIONS_PER_TEST}
+Trials to skip: ${TRIALS_TO_SKIP}
+EOF
 
 # == Helpers ==================================================================
 
 log() {
-  echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" | tee -a "${PROJECT_DIR}/logs/run_matrix.log"
+  echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" | tee -a "${LOG_FILE}"
 }
 
 init_throttle_stats_csv
@@ -114,7 +127,7 @@ main() {
 
   log "Matrix sweep complete. Results in ${RESULTS_DIR}/"
 
-  rm -f nginx/nginx.conf
+  rm -f "${NGINX_CONF}"
 }
 
 main "$@"
