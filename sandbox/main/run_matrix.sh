@@ -35,12 +35,13 @@ declare -A KEM_GROUPS=(
   # ["pure768"]="MLKEM768"
 )
 
-USER_LEVELS=(1 10 50)
+USER_LEVELS=(50)
 RTTS=(0 10 25)         # Round-trip time in milliseconds. This is the artificial latency that will be introduced in the network emulation.
 LOSS_LEVELS=(0 1 2)  # Packet loss percentage. This is the percentage of packets that will be randomly dropped in the network emulation.
 
 DURATION="30s" # Headless Locust run duration per combination (seconds).
-REPETITIONS_PER_TEST=1 # Number of times to repeat each combination for averaging or variance analysis.
+REPETITIONS_PER_TEST=3 # Number of times to repeat each combination for averaging or variance analysis.
+TRIALS_TO_SKIP=0 # Number of initial trials to skip (useful for resuming an interrupted sweep).
 
 # Identifies the name of this file, then the directory containing said file, and sets PROJECT_DIR to that path.
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -87,18 +88,17 @@ main() {
   local total_trials_performed=0
   total_trials=$(( total_combinations * REPETITIONS_PER_TEST ))
 
-  local trials_to_skip=10
-
   for kem_label in "${!KEM_GROUPS[@]}"; do
     kem_value="${KEM_GROUPS[${kem_label}]}"
-    start_up_containers "${kem_label}" "${kem_value}"
 
     for users in "${USER_LEVELS[@]}"; do
       for rtt in "${RTTS[@]}"; do
         for loss in "${LOSS_LEVELS[@]}"; do
           for ((rep=1; rep<=REPETITIONS_PER_TEST; rep++)); do
-            if (( total_trials_performed >= trials_to_skip )); then
+            if (( total_trials_performed >= TRIALS_TO_SKIP )); then
+              start_up_containers "${kem_label}" "${kem_value}"
               run_one_combination "${kem_label}" "${kem_value}" "${users}" "${rtt}" "${loss}" "${rep}" "$((total_trials_performed + 1))"
+              teardown
             fi
 
             (( total_trials_performed += 1 ))
