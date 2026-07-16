@@ -206,7 +206,9 @@ run_one_combination() {
 
   if [ "${throttle_capture_ok}" -eq 1 ]; then
     log "Starting headless Locust run..."
-    docker compose exec -T oqs-locust \
+    docker compose exec -T \
+      -e TARGET_HANDSHAKES="${TARGET_HANDSHAKES}" \
+      oqs-locust \
       locust \
         --locustfile /mnt/locust/locustfile.py \
         --host https://oqs-nginx:4433 \

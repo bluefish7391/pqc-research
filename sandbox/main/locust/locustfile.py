@@ -9,7 +9,8 @@ from locust import User, task, constant, events
 KEM_GROUP   = os.getenv("OQS_KEM_GROUP", "X25519MLKEM768")
 TARGET_HOST = os.getenv("TARGET_HOST", "oqs-nginx")
 TARGET_PORT = os.getenv("TARGET_PORT", "4433")
-WAIT_TIME   = float(os.getenv("WAIT_TIME", "0"))
+TARGET_HANDSHAKES = int(os.getenv("TARGET_HANDSHAKES", "1000"))
+WAIT_TIME   = 0.0
 OPENSSL_BIN = "/opt/oqssa/bin/openssl"
 
 # Logging setup
@@ -26,6 +27,16 @@ HTTP_REQUEST = (
     f"Connection: close\r\n"
     f"\r\n"
 ).encode("ascii")
+
+
+completed_handshakes = 0
+
+def _check_stop_condition(environment):
+    global completed_handshakes
+    completed_handshakes += 1
+    if completed_handshakes >= TARGET_HANDSHAKES:
+        log.info(f"Target of {TARGET_HANDSHAKES} handshakes reached ({completed_handshakes}). Stopping runner.")
+        environment.runner.quit()
 
 # Define a custom Locust user class that performs TLS handshakes using OpenSSL's s_client.
 class TLSHandshakeUser(User):
@@ -105,3 +116,7 @@ class TLSHandshakeUser(User):
                 response_length = 0,
                 exception       = e,
             )
+
+        # Check if the target number of handshakes has been reached and stop the Locust runner if so.
+        finally:
+            _check_stop_condition(self.environment)

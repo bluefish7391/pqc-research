@@ -39,7 +39,8 @@ USER_LEVELS=(50)
 RTTS=(0 10 25)         # Round-trip time in milliseconds. This is the artificial latency that will be introduced in the network emulation.
 LOSS_LEVELS=(0 1 2)  # Packet loss percentage. This is the percentage of packets that will be randomly dropped in the network emulation.
 
-DURATION="30s" # Headless Locust run duration per combination (seconds).
+TARGET_HANDSHAKES=1000 # Total number of handshakes to perform in each trial.
+DURATION="30s" # Headless Locust run max duration per combination (seconds).
 REPETITIONS_PER_TEST=3 # Number of times to repeat each combination for averaging or variance analysis.
 TRIALS_TO_SKIP=0 # Number of initial trials to skip (useful for resuming an interrupted sweep).
 
