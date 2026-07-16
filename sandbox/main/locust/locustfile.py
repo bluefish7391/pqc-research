@@ -60,7 +60,8 @@ class TLSHandshakeUser(User):
             # and suppress output.
             # Python temporarily pauses the execution of this specific Locust user thread and 
             # hands control over to the operating system kernel.
-            log.info(f"PRE-FORK pid={os.getpid()} ppid={os.getppid()} time={time.time()}")
+            start_time=time.time()
+            log.info(f"PRE-FORK pid={os.getpid()} ppid={os.getppid()} start_time={start_time}")
             result = subprocess.run(
                 # Array of command-line arguments for the OpenSSL s_client command.
                 [
@@ -75,7 +76,7 @@ class TLSHandshakeUser(User):
                 capture_output=True, # Capture stdout and stderr for analysis.
                 timeout=10, # Set a timeout for the handshake operation to avoid hanging indefinitely. Measured in seconds.
             )
-            log.info(f"POST-FORK pid={os.getpid()} ppid={os.getppid()} time={time.time()} returncode={result.returncode}")
+            log.info(f"POST-FORK pid={os.getpid()} ppid={os.getppid()} start_time={start_time} returncode={result.returncode}")
 
             elapsed_ms = (time.perf_counter_ns() - start_ns) // 1_000_000
             
