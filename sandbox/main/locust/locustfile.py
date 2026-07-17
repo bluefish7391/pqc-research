@@ -3,6 +3,9 @@ import subprocess
 import threading
 import time
 import logging
+import signal
+import io
+import gevent.util
 from locust import User, task, constant, events
 
 # Configuration and global variables
@@ -14,8 +17,13 @@ WAIT_TIME   = 0.0
 OPENSSL_BIN = "/opt/oqssa/bin/openssl"
 
 # Logging setup
-logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("oqs-tls")
+log.setLevel(logging.INFO)
+
+file_handler = logging.FileHandler("/mnt/locust/locust_debug.log", mode="a")
+file_handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
+log.addHandler(file_handler)
+log.propagate = False  # avoid duplicate lines also going to Locust's console handler
 
 # Create the HTTP request to be sent after the TLS handshake, identical for all users, 
 # so can be precomputed once.
@@ -29,14 +37,24 @@ HTTP_REQUEST = (
 ).encode("ascii")
 
 
+# Signal handler to dump greenlet information when receiving SIGUSR1. This is useful for debugging and monitoring the state of the Locust users during execution.
+def dump_greenlets(signum, frame):
+    log.info("=== GREENLET DUMP ===")
+    output = io.StringIO()
+    gevent.util.print_run_info(file=output)
+    for line in output.getvalue().splitlines():
+        log.info(line)
+
+signal.signal(signal.SIGUSR1, dump_greenlets)
+
 completed_handshakes = 0
 
 def _check_stop_condition(environment):
     global completed_handshakes
     completed_handshakes += 1
-    if completed_handshakes >= TARGET_HANDSHAKES:
-        log.info(f"Target of {TARGET_HANDSHAKES} handshakes reached ({completed_handshakes}). Stopping runner.")
-        environment.runner.quit()
+    # if completed_handshakes >= TARGET_HANDSHAKES:
+    #     log.info(f"Target of {TARGET_HANDSHAKES} handshakes reached ({completed_handshakes}). Stopping runner.")
+    #     environment.runner.quit()
 
 # Define a custom Locust user class that performs TLS handshakes using OpenSSL's s_client.
 class TLSHandshakeUser(User):
@@ -60,8 +78,9 @@ class TLSHandshakeUser(User):
             # and suppress output.
             # Python temporarily pauses the execution of this specific Locust user thread and 
             # hands control over to the operating system kernel.
+
             start_time=time.time()
-            log.info(f"PRE-FORK pid={os.getpid()} ppid={os.getppid()} start_time={start_time}")
+            # log.info(f"PRE-FORK pid={os.getpid()} ppid={os.getppid()} start_time={start_time}")
             result = subprocess.run(
                 # Array of command-line arguments for the OpenSSL s_client command.
                 [
@@ -76,7 +95,7 @@ class TLSHandshakeUser(User):
                 capture_output=True, # Capture stdout and stderr for analysis.
                 timeout=10, # Set a timeout for the handshake operation to avoid hanging indefinitely. Measured in seconds.
             )
-            log.info(f"POST-FORK pid={os.getpid()} ppid={os.getppid()} start_time={start_time} returncode={result.returncode}")
+            # log.info(f"POST-FORK pid={os.getpid()} ppid={os.getppid()} start_time={start_time} returncode={result.returncode}")
 
             elapsed_ms = (time.perf_counter_ns() - start_ns) // 1_000_000
             
