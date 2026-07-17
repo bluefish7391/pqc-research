@@ -12,3 +12,6 @@ locust/nginx.conf
 locust/results*
 logs/
 nginx/nginx.conf
+
+# venv
+.venv/
