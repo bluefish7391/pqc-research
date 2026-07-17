@@ -35,7 +35,7 @@ declare -A KEM_GROUPS=(
   # ["pure768"]="MLKEM768"
 )
 
-USER_LEVELS=(50)
+USER_LEVELS=(100)
 RTTS=(0 10 25)         # Round-trip time in milliseconds. This is the artificial latency that will be introduced in the network emulation.
 LOSS_LEVELS=(0 1 2)  # Packet loss percentage. This is the percentage of packets that will be randomly dropped in the network emulation.
 
