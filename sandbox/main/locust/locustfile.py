@@ -13,6 +13,7 @@ KEM_GROUP   = os.getenv("OQS_KEM_GROUP", "X25519MLKEM768")
 TARGET_HOST = os.getenv("TARGET_HOST", "oqs-nginx")
 TARGET_PORT = os.getenv("TARGET_PORT", "4433")
 TARGET_HANDSHAKES = int(os.getenv("TARGET_HANDSHAKES", "1000"))
+RUN_ID = os.getenv("RUN_ID", "").strip()
 WAIT_TIME   = 0.0
 OPENSSL_BIN = "/opt/oqssa/bin/openssl"
 
@@ -20,7 +21,8 @@ OPENSSL_BIN = "/opt/oqssa/bin/openssl"
 log = logging.getLogger("oqs-tls")
 log.setLevel(logging.INFO)
 
-file_handler = logging.FileHandler("/mnt/locust/locust_debug.log", mode="a")
+log_file_name = f"{RUN_ID}_locust_debug.log" if RUN_ID else "locust_debug.log"
+file_handler = logging.FileHandler(f"/mnt/locust/{log_file_name}", mode="a")
 file_handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
 log.addHandler(file_handler)
 log.propagate = False  # avoid duplicate lines also going to Locust's console handler
