@@ -55,13 +55,15 @@ DATA_DIR="${PROJECT_DIR}/data"
 COLLECTION_DIR="${DATA_DIR}/collection_$(date '+%Y%m%d_%H%M%S')"
 RESULTS_DIR="${COLLECTION_DIR}/results"
 export PCAP_DIR="${COLLECTION_DIR}/pcaps" # Needs to be exported so that the compose file can access it as an environment variable for volume mounting.
-LOG_FILE="${COLLECTION_DIR}/run_matrix.log"
+
+LOG_DIR="${COLLECTION_DIR}/logs"
+MAIN_LOG_FILE="${LOG_DIR}/run_matrix.log"
 LOCUST_OUT_DIR="${PROJECT_DIR}/locust"
 
 # Create directories for results, pcaps, and logs if they don't exist yet,
 # as these are untracked by git and may not be present in a fresh clone.
-mkdir -p "${COLLECTION_DIR}" "${RESULTS_DIR}" "${PCAP_DIR}"
-touch "${LOG_FILE}" "${COLLECTION_DIR}/run_info.txt"
+mkdir -p "${COLLECTION_DIR}" "${RESULTS_DIR}" "${PCAP_DIR}" "${LOG_DIR}"
+touch "${MAIN_LOG_FILE}" "${COLLECTION_DIR}/run_info.txt"
 
 # Write run info (levels of each independent variable tested) to a file for later reference.
 cat << EOF >> "${COLLECTION_DIR}/run_info.txt"
@@ -79,7 +81,7 @@ EOF
 # == Helpers ==================================================================
 
 log() {
-  echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" | tee -a "${LOG_FILE}"
+  echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" | tee -a "${MAIN_LOG_FILE}"
 }
 
 init_throttle_stats_csv

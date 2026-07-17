@@ -244,7 +244,7 @@ run_one_combination() {
   # Checks if any CSV output files match the the expected pattern before attempting to move them to the results directory.
   if compgen -G "${LOCUST_OUT_DIR}/results_${run_id}*" > /dev/null; then
     mv "${LOCUST_OUT_DIR}"/results_"${run_id}"* "${RESULTS_DIR}/"
-    log "Moved results_${run_id}* to ${RESULTS_DIR}/"
+    mv "${LOCUST_OUT_DIR}/${run_id}"* "${LOG_DIR}/"
   else
     log "WARNING: no CSV output found for ${run_id} — check locust container logs."
   fi
