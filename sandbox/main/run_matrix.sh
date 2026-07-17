@@ -42,7 +42,8 @@ LOSS_LEVELS=(0 1 2)  # Packet loss percentage. This is the percentage of packets
 TARGET_HANDSHAKES=1000 # Total number of handshakes to perform in each trial.
 DURATION="30s" # Headless Locust run max duration per combination (seconds).
 REPETITIONS_PER_TEST=3 # Number of times to repeat each combination for averaging or variance analysis.
-TRIALS_TO_SKIP=0 # Number of initial trials to skip (useful for resuming an interrupted sweep).
+TRIALS_TO_SKIP_AT_START=0 # Number of initial trials to skip (useful for resuming an interrupted sweep).
+TRIALS_TO_SKIP_AT_END=0 # Number of final trials to skip (useful for resuming an interrupted sweep).
 
 # Identifies the name of this file, then the directory containing said file, and sets PROJECT_DIR to that path.
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -71,7 +72,8 @@ RTTs (ms): ${RTTS[*]}
 Loss levels (%): ${LOSS_LEVELS[*]}
 Duration per run: ${DURATION}
 Repetitions per test: ${REPETITIONS_PER_TEST}
-Trials to skip: ${TRIALS_TO_SKIP}
+Trials to skip at start: ${TRIALS_TO_SKIP_AT_START}
+Trials to skip at end: ${TRIALS_TO_SKIP_AT_END}
 EOF
 
 # == Helpers ==================================================================
@@ -109,7 +111,7 @@ main() {
       for rtt in "${RTTS[@]}"; do
         for loss in "${LOSS_LEVELS[@]}"; do
           for ((rep=1; rep<=REPETITIONS_PER_TEST; rep++)); do
-            if (( total_trials_performed >= TRIALS_TO_SKIP )); then
+            if (( total_trials_performed >= TRIALS_TO_SKIP_AT_START && total_trials_performed < total_trials - TRIALS_TO_SKIP_AT_END )); then
               start_up_containers "${kem_label}" "${kem_value}"
               run_one_combination "${kem_label}" "${kem_value}" "${users}" "${rtt}" "${loss}" "${rep}" "$((total_trials_performed + 1))"
               teardown
