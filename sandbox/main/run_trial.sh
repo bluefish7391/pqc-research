@@ -218,6 +218,7 @@ run_one_combination() {
         --users "${users}" \
         --spawn-rate "${spawn_rate}" \
         --run-time "${DURATION}" \
+        --stop-timeout 5 \
         --csv "/mnt/locust/results_${run_id}" \
         --csv-full-history \
       || log "WARNING: locust exited non-zero for ${run_id} (check stats before discarding the run)"
