@@ -82,7 +82,8 @@ class TLSHandshakeUser(User):
             # hands control over to the operating system kernel.
 
             start_time=time.time()
-            # log.info(f"PRE-FORK pid={os.getpid()} ppid={os.getppid()} start_time={start_time}")
+
+            log.info(f"Request start: start_time={start_time}, completed_handshakes={completed_handshakes}")
             result = subprocess.run(
                 # Array of command-line arguments for the OpenSSL s_client command.
                 [
@@ -97,7 +98,7 @@ class TLSHandshakeUser(User):
                 capture_output=True, # Capture stdout and stderr for analysis.
                 timeout=10, # Set a timeout for the handshake operation to avoid hanging indefinitely. Measured in seconds.
             )
-            # log.info(f"POST-FORK pid={os.getpid()} ppid={os.getppid()} start_time={start_time} returncode={result.returncode}")
+            log.info(f"Request end: start_time={start_time}, completed_handshakes={completed_handshakes}")
 
             elapsed_ms = (time.perf_counter_ns() - start_ns) // 1_000_000
             
@@ -119,6 +120,7 @@ class TLSHandshakeUser(User):
 
         # Handle timeout exception only.
         except subprocess.TimeoutExpired:
+            log.info(f"TIMEOUT-CAUGHT pid={os.getpid()} at {time.time()}")
             elapsed_ms = (time.perf_counter_ns() - start_ns) // 1_000_000
             events.request.fire(
                 request_type    = "TLS-Handshake",
