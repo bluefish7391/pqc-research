@@ -53,11 +53,10 @@ completed_handshakes = 0
 _stop_requested = False
 
 def _check_stop_condition(environment):
-    global completed_handshakes
+    global completed_handshakes, stop_requested
     completed_handshakes += 1
     if completed_handshakes >= TARGET_HANDSHAKES and not _stop_requested:
         log.info(f"Target of {TARGET_HANDSHAKES} handshakes reached ({completed_handshakes}). Stopping runner.")
-        global _stop_requested
         _stop_requested = True
         environment.runner.quit()
 
