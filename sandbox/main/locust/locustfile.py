@@ -23,7 +23,7 @@ log.setLevel(logging.INFO)
 
 log_file_name = f"{RUN_ID}_locust_debug.log" if RUN_ID else "locust_debug.log"
 file_handler = logging.FileHandler(f"/mnt/locust/{log_file_name}", mode="a")
-file_handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
+file_handler.setFormatter(logging.Formatter("%(message)s"))
 log.addHandler(file_handler)
 log.propagate = False  # avoid duplicate lines also going to Locust's console handler
 
@@ -58,7 +58,7 @@ def _check_stop_condition(environment):
     if completed_handshakes >= TARGET_HANDSHAKES and not stop_requested:
         log.info(f"Target of {TARGET_HANDSHAKES} handshakes reached ({completed_handshakes}). Stopping runner.")
         stop_requested = True
-        environment.runner.quit()
+        gevent.spawn(environment.runner.quit)
 
 # Define a custom Locust user class that performs TLS handshakes using OpenSSL's s_client.
 class TLSHandshakeUser(User):
@@ -83,7 +83,7 @@ class TLSHandshakeUser(User):
             # Python temporarily pauses the execution of this specific Locust user thread and 
             # hands control over to the operating system kernel.
 
-            start_time=time.time()
+            start_time=time.time_ns()
 
             log.info(f"Request start: start_time={start_time}, completed_handshakes={completed_handshakes}")
             result = subprocess.run(
