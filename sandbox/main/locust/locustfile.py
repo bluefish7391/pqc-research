@@ -50,14 +50,14 @@ def dump_greenlets(signum, frame):
 signal.signal(signal.SIGUSR1, dump_greenlets)
 
 completed_handshakes = 0
-_stop_requested = False
+stop_requested = False
 
 def _check_stop_condition(environment):
     global completed_handshakes, stop_requested
     completed_handshakes += 1
-    if completed_handshakes >= TARGET_HANDSHAKES and not _stop_requested:
+    if completed_handshakes >= TARGET_HANDSHAKES and not stop_requested:
         log.info(f"Target of {TARGET_HANDSHAKES} handshakes reached ({completed_handshakes}). Stopping runner.")
-        _stop_requested = True
+        stop_requested = True
         environment.runner.quit()
 
 # Define a custom Locust user class that performs TLS handshakes using OpenSSL's s_client.
