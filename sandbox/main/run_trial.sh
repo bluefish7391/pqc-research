@@ -1,8 +1,4 @@
 
-# Sets how fast Locust ramps to the target user count.
-# Can be adjusted later to implement warm up periods and avoid excessive load spikes.
-SPAWN_RATE_FN() { echo "$1"; }
-
 THROTTLE_ALIASES=(lt rt ws)
 THROTTLE_METRICS=(nr_periods nr_throttled throttled_usec)
 declare -A THROTTLE_CONTAINERS=(
@@ -98,11 +94,10 @@ run_one_combination() {
   local loss_pct="$5"
   local repetition="$6"
   local trial_number="$7"
-  local spawn_rate="$(SPAWN_RATE_FN "${users}")"
 
   local run_id="${kem_label}_u${users}_rtt${rtt_ms}ms_loss${loss_pct}pct_rep${repetition}"
   log "════════════════════════════════════════════════════════════"
-  log "RUN(${trial_number}/${total_trials}): kem=${kem_label} (${kem_value})  users=${users}  rtt=${rtt_ms}ms  loss=${loss_pct}%  duration=${DURATION}"
+  log "RUN(${trial_number}/${total_trials}): kem=${kem_label} (${kem_value})  users=${users}  rtt=${rtt_ms}ms  loss=${loss_pct}% repetition=${repetition}"
   log "════════════════════════════════════════════════════════════"
 
   log "Resetting network conditions..."
@@ -216,8 +211,8 @@ run_one_combination() {
         --headless \
         --only-summary \
         --users "${users}" \
-        --spawn-rate "${spawn_rate}" \
-        --run-time "${DURATION}" \
+        --spawn-rate "${SPAWN_RATE}" \
+        --run-time "${MAX_DURATION}" \
         --stop-timeout 5 \
         --csv "/mnt/locust/results_${run_id}" \
         --csv-full-history \

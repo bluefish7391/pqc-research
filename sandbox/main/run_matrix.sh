@@ -35,12 +35,13 @@ declare -A KEM_GROUPS=(
   # ["pure768"]="MLKEM768"
 )
 
-USER_LEVELS=(100)
+SPAWN_RATE=50
+USER_LEVELS=(500)
 RTTS=(0 10 25)         # Round-trip time in milliseconds. This is the artificial latency that will be introduced in the network emulation.
 LOSS_LEVELS=(0 1 2)  # Packet loss percentage. This is the percentage of packets that will be randomly dropped in the network emulation.
 
-TARGET_HANDSHAKES=1000 # Total number of handshakes to perform in each trial.
-DURATION="30s" # Headless Locust run max duration per combination (seconds).
+TARGET_HANDSHAKES=500 # Total number of handshakes to perform in each trial.
+MAX_DURATION="60s" # Headless Locust run max duration per combination (seconds).
 REPETITIONS_PER_TEST=3 # Number of times to repeat each combination for averaging or variance analysis.
 TRIALS_TO_SKIP_AT_START=0 # Number of initial trials to skip (useful for resuming an interrupted sweep).
 TRIALS_TO_SKIP_AT_END=0 # Number of final trials to skip (useful for resuming an interrupted sweep).
@@ -72,7 +73,8 @@ KEM groups: ${!KEM_GROUPS[*]}
 User levels: ${USER_LEVELS[*]}
 RTTs (ms): ${RTTS[*]}
 Loss levels (%): ${LOSS_LEVELS[*]}
-Duration per run: ${DURATION}
+Target handshakes per trial: ${TARGET_HANDSHAKES}
+Max duration per run: ${MAX_DURATION}
 Repetitions per test: ${REPETITIONS_PER_TEST}
 Trials to skip at start: ${TRIALS_TO_SKIP_AT_START}
 Trials to skip at end: ${TRIALS_TO_SKIP_AT_END}
@@ -95,7 +97,10 @@ main() {
   log "Starting KD protocol benchmark matrix sweep."
   log "KEM groups: ${!KEM_GROUPS[*]}"
   log "User levels: ${USER_LEVELS[*]}"
-  log "Duration per run: ${DURATION}"
+  log "RTTs (ms): ${RTTS[*]}"
+  log "Loss levels (%): ${LOSS_LEVELS[*]}"
+  log "Target handshakes per trial: ${TARGET_HANDSHAKES}"
+  log "Max duration per run: ${MAX_DURATION}"
 
   cd "${PROJECT_DIR}"
 
