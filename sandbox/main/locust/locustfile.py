@@ -1,13 +1,13 @@
 import os
 import subprocess
 import uuid
-import threading
 import time
 import logging
 import signal
 import io
 import gevent.util
 from locust import User, task, constant, events
+import csv
 
 # Configuration and global variables
 KEM_GROUP   = os.getenv("OQS_KEM_GROUP", "X25519MLKEM768")
@@ -17,6 +17,24 @@ TARGET_HANDSHAKES = int(os.getenv("TARGET_HANDSHAKES", "1000"))
 RUN_ID = os.getenv("RUN_ID", "").strip()
 WAIT_TIME   = 0.0
 OPENSSL_BIN = "/opt/oqssa/bin/openssl"
+
+# Open once per Locust worker process, at import time
+csv_path = f"/mnt/locust/results_{RUN_ID}_requests.csv"
+_csv_file = open(csv_path, "w", newline="")
+_csv_writer = csv.writer(_csv_file)
+_csv_writer.writerow(["request_id", "start_time_ns", "response_time_ms", "response_length", "success", "exception"])
+
+@events.request.add_listener
+def log_request_to_csv(request_type, name, response_time, response_length, exception, context, **kwargs):
+    _csv_writer.writerow([
+        context.get("request_id"),
+        context.get("start_time_ns"),
+        response_time,
+        response_length,
+        exception is not None,
+        str(exception) if exception else "",
+    ])
+    _csv_file.flush()  # so data isn't lost if the run is killed/times out
 
 # Logging setup
 log = logging.getLogger("oqs-tls")
@@ -117,6 +135,7 @@ class TLSHandshakeUser(User):
                     response_time   = elapsed_ms,
                     response_length = len(stdout),
                     exception       = None,
+                    context         = {"request_id": request_id, "start_time_ns": start_time},
                 )
             else:
                 stderr = result.stderr.decode("ascii", errors="replace").strip()
@@ -132,6 +151,7 @@ class TLSHandshakeUser(User):
                 response_time   = elapsed_ms,
                 response_length = 0,
                 exception       = Exception("Timeout"),
+                context         = {"request_id": request_id, "start_time_ns": start_time},
             )
 
         # Handle any other exceptions that may occur during the handshake process, such as network errors or unexpected output.
@@ -143,6 +163,7 @@ class TLSHandshakeUser(User):
                 response_time   = elapsed_ms,
                 response_length = 0,
                 exception       = e,
+                context         = {"request_id": request_id, "start_time_ns": start_time},
             )
 
         # Check if the target number of handshakes has been reached and stop the Locust runner if so.
