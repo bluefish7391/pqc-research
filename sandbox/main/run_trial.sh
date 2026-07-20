@@ -69,20 +69,15 @@ capture_throttle_stats_batch() {
 }
 
 extract_pcap_metrics() {
-  # TODO: This function currently only extracts a basic retransmission summary.
-  # Before real data collection, expand to extract:
-  #   - Total handshake bytes (ClientHello size, server handshake size, total)
-  #   - Handshake packet count and TCP segment count per stream
-  #   - Per-stream retransmission count (not just aggregate)
-
   local run_id="$1"
   local pcap="/mnt/pcaps/${run_id}.pcap"
   local out="${RESULTS_DIR}/pcap_summary_${run_id}.csv"
 
-  # Use tshark to read the pcap file and generate a summary of TCP retransmissions, writing the output to a CSV file in the results directory.
   docker compose exec -T router \
-    tshark -r "${pcap}" -q \
-      -z "io,stat,0,tcp.len,tcp.analysis.retransmission" \
+  tshark -r "${pcap}" -T fields \
+    -e frame.time_epoch -e tcp.stream -e tcp.flags \
+    -e tls.handshake.type -e tls.record.content_type \
+    -E separator=, -E header=y \
     > "${out}" 2>&1 || log "WARNING: tshark summary failed for ${run_id}"
 }
 
@@ -224,6 +219,8 @@ run_one_combination() {
     fi
   fi
 
+  log "Load test complete. Stopping background monitor and tshark..."
+
   kill "${SAMPLER_PID}" 2>/dev/null || true
   pkill -P "${SAMPLER_PID}" 2>/dev/null || true
   wait "${SAMPLER_PID}" 2>/dev/null || true
@@ -234,7 +231,7 @@ run_one_combination() {
   docker compose exec -T -u root router pkill -SIGINT tshark 2>/dev/null || true
   wait $TSHARK_PID 2>/dev/null || true
 
-  extract_pcap_metrics "${run_id}"
+  # extract_pcap_metrics "${run_id}"
   write_throttle_stats "${run_id}" throttle_capture_ok throttle_snapshots_before throttle_snapshots_after
 
   # Checks if any CSV output files match the the expected pattern before attempting to move them to the results directory.
@@ -244,6 +241,8 @@ run_one_combination() {
   else
     log "WARNING: no CSV output found for ${run_id} — check locust container logs."
   fi
+
+  log "Data collection complete."
 }
 
 record_throttle_stats_for_container() {
