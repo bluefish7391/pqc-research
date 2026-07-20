@@ -70,8 +70,9 @@ capture_throttle_stats_batch() {
 
 extract_pcap_metrics() {
   local run_id="$1"
+  local run_results_dir="$2"
   local pcap="/mnt/pcaps/${run_id}.pcap"
-  local out="${RESULTS_DIR}/pcap_summary_${run_id}.csv"
+  local out="${run_results_dir}/pcap_summary_${run_id}.csv"
 
   docker compose exec -T router \
   tshark -r "${pcap}" -T fields \
@@ -91,6 +92,9 @@ run_one_combination() {
   local trial_number="$7"
 
   local run_id="${kem_label}_u${users}_rtt${rtt_ms}ms_loss${loss_pct}pct_rep${repetition}"
+  local run_results_dir="${RESULTS_DIR}/${run_id}"
+  mkdir -p "${run_results_dir}"
+
   log "════════════════════════════════════════════════════════════"
   log "RUN(${trial_number}/${total_trials}): kem=${kem_label} (${kem_value})  users=${users}  rtt=${rtt_ms}ms  loss=${loss_pct}% repetition=${repetition}"
   log "════════════════════════════════════════════════════════════"
@@ -108,7 +112,7 @@ run_one_combination() {
   # Start tshark in the background to capture packets on eth0, filtering for traffic to/from the oqs-nginx container on port 4433.
   # Write the captured packets to a pcap file named after the run_id in the PCAP_DIR.
   # Start tshark and capture stderr so we can detect readiness text.
-  tshark_log="${RESULTS_DIR}/tshark_${run_id}.log"
+  tshark_log="${run_results_dir}/tshark_${run_id}.log"
   local pcap_path="/mnt/pcaps/${run_id}.pcap"
   NGINX_IFACE=$(docker compose exec -T -u root router \
     sh -c "ip -o addr show | awk '/172\\.20\\.0\\.2/{print \$2}'" \
@@ -141,7 +145,7 @@ run_one_combination() {
     elapsed=$((elapsed + 1))
   done
 
-  local cpu_log_file="${RESULTS_DIR}/cpu_matrix_${run_id}.csv"
+  local cpu_log_file="${run_results_dir}/cpu_matrix_${run_id}.csv"
   echo "Timestamp,Container,CPU_Pct,Mem_Usage,Net_IO_Rx_Tx" > "${cpu_log_file}"
 
   log "Spawning background monitor (waiting for locust to spin up)..."
@@ -236,7 +240,7 @@ run_one_combination() {
 
   # Checks if any CSV output files match the the expected pattern before attempting to move them to the results directory.
   if compgen -G "${LOCUST_OUT_DIR}/results_${run_id}*" > /dev/null; then
-    mv "${LOCUST_OUT_DIR}"/results_"${run_id}"* "${RESULTS_DIR}/"
+    mv "${LOCUST_OUT_DIR}"/results_"${run_id}"* "${run_results_dir}/"
     mv "${LOCUST_OUT_DIR}/${run_id}"* "${LOG_DIR}/"
   else
     log "WARNING: no CSV output found for ${run_id} — check locust container logs."
