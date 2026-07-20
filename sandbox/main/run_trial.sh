@@ -161,7 +161,7 @@ run_one_combination() {
     next_tick=$(date +%s%N)
 
     while true; do
-      current_time=$(date '+%Y-%m-%d %H:%M:%S')
+      current_time=$(date +%s%N)
 
       docker stats --no-stream --format '{{.Name}},{{.CPUPerc}},{{.MemUsage}},{{.NetIO}}' oqs-locust oqs-nginx 2>/dev/null \
         | while IFS=',' read -r c_name cpu_perc mem_schema net_io; do
