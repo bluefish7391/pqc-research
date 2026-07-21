@@ -44,6 +44,31 @@ REQUIRED_TRIAL_METRICS = [
     "resource_gap_ns",
 ]
 
+BUCKET_ONLY_TRIAL_METRICS = ["requests_in_bucket"]
+
+BUCKET_MEAN_METRICS = {"response_time_ms"}
+BUCKET_SUM_METRICS = {
+    "response_length",
+    "success",
+    "packets_client_to_server_per_request",
+    "packets_server_to_client_per_request",
+    "packets_total_per_request",
+}
+BUCKET_LAST_METRICS = {
+    "locust_cpu_pct",
+    "locust_mem_used_bytes",
+    "locust_mem_limit_bytes",
+    "locust_net_rx_bytes",
+    "locust_net_tx_bytes",
+    "nginx_cpu_pct",
+    "nginx_mem_used_bytes",
+    "nginx_mem_limit_bytes",
+    "nginx_net_rx_bytes",
+    "nginx_net_tx_bytes",
+    "pcap_match_quality_code",
+    "resource_gap_ns",
+}
+
 
 UNIT_FACTORS = {
     "": 1.0,
@@ -106,6 +131,7 @@ class Config:
     overwrite: bool
     fallback_window_ns: int
     emit_validation_report: bool
+    timestamp_bucket_ms: int | None
 
 
 class RouterTsharkSession:
@@ -335,6 +361,12 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=1_000_000_000,
         help="Last request window minimum when next request start is unavailable",
+    )
+    parser.add_argument(
+        "--timestamp-bucket-ms",
+        type=int,
+        default=None,
+        help="Optional output-only timestamp bucketing (floor to N millisecond buckets)",
     )
     return parser.parse_args()
 
@@ -967,6 +999,90 @@ def merge_metric_rows(*metric_sets: Iterable[dict[str, float | int | None]]) -> 
     return merged
 
 
+def _mean_non_missing(values: list[float | int | None]) -> float | None:
+    nums = [float(v) for v in values if v is not None]
+    if not nums:
+        return None
+    return sum(nums) / len(nums)
+
+
+def _sum_non_missing(values: list[float | int | None]) -> float | None:
+    nums = [float(v) for v in values if v is not None]
+    if not nums:
+        return None
+    return sum(nums)
+
+
+def _last_non_missing(values: list[float | int | None]) -> float | None:
+    for val in reversed(values):
+        if val is not None:
+            return float(val)
+    return None
+
+
+def bucket_trial_rows(
+    rows: list[dict[str, float | int | None]],
+    timestamp_bucket_ms: int,
+) -> list[dict[str, float | int | None]]:
+    if not rows:
+        return []
+
+    bucket_ns = timestamp_bucket_ms * 1_000_000
+    rows_sorted = sorted(rows, key=lambda r: int(r["timestamp_ns"]))
+
+    grouped: dict[int, list[dict[str, float | int | None]]] = {}
+    for row in rows_sorted:
+        ts = int(row["timestamp_ns"])
+        bucket_ts = (ts // bucket_ns) * bucket_ns
+        grouped.setdefault(bucket_ts, []).append(row)
+
+    aggregated_rows: list[dict[str, float | int | None]] = []
+    for bucket_ts in sorted(grouped.keys()):
+        bucket_rows = grouped[bucket_ts]
+        out_row: dict[str, float | int | None] = {"timestamp_ns": bucket_ts}
+
+        for metric in REQUIRED_TRIAL_METRICS:
+            vals = [r.get(metric) for r in bucket_rows]
+            if metric in BUCKET_MEAN_METRICS:
+                out_row[metric] = _mean_non_missing(vals)
+            elif metric in BUCKET_SUM_METRICS:
+                out_row[metric] = _sum_non_missing(vals)
+            elif metric in BUCKET_LAST_METRICS:
+                out_row[metric] = _last_non_missing(vals)
+            else:
+                # Default to deterministic last non-missing if a new metric appears.
+                out_row[metric] = _last_non_missing(vals)
+
+        out_row["requests_in_bucket"] = float(len(bucket_rows))
+        aggregated_rows.append(out_row)
+
+    return aggregated_rows
+
+
+def maybe_bucket_trial_contexts(
+    trial_contexts: list[TrialContext],
+    timestamp_bucket_ms: int | None,
+    stats: dict[str, int],
+) -> list[TrialContext]:
+    if timestamp_bucket_ms is None:
+        return trial_contexts
+
+    bucketed_contexts: list[TrialContext] = []
+    for ctx in trial_contexts:
+        original_len = len(ctx.rows)
+        bucketed_rows = bucket_trial_rows(ctx.rows, timestamp_bucket_ms)
+        stats["bucket_rows_collapsed"] += max(0, original_len - len(bucketed_rows))
+        bucketed_contexts.append(
+            TrialContext(
+                trial=ctx.trial,
+                rows=bucketed_rows,
+                empty_after_warmup=ctx.empty_after_warmup,
+            )
+        )
+
+    return bucketed_contexts
+
+
 def process_trial(
     art: TrialArtifacts,
     cfg: Config,
@@ -1069,6 +1185,7 @@ def numeric_to_csv(value: Any) -> str:
 
 def build_output_rows(
     trial_contexts: list[TrialContext],
+    timestamp_bucket_ms: int | None,
 ) -> tuple[list[str], list[dict[str, float | int | None]]]:
     # Outer-join all trial frames on timestamp_ns using dict accumulation.
     merged: dict[int, dict[str, float | int | None]] = {}
@@ -1084,8 +1201,12 @@ def build_output_rows(
     sorted_trials = sorted(ctx.trial for ctx in trial_contexts)
 
     header = ["timestamp_ns"]
+    trial_metrics = list(REQUIRED_TRIAL_METRICS)
+    if timestamp_bucket_ms is not None:
+        trial_metrics.extend(BUCKET_ONLY_TRIAL_METRICS)
+
     for trial in sorted_trials:
-        for metric in REQUIRED_TRIAL_METRICS:
+        for metric in trial_metrics:
             header.append(f"{trial}__{metric}")
 
     output_rows = [merged[ts] for ts in sorted(merged.keys())]
@@ -1124,6 +1245,8 @@ def write_validation_report(
     report = {
         "collection": cfg.collection_path.name,
         "output_file": str(output_file),
+        "timestamp_bucket_enabled": cfg.timestamp_bucket_ms is not None,
+        "timestamp_bucket_ms": cfg.timestamp_bucket_ms,
         "trials_discovered": len(trial_contexts),
         "trials_empty_after_warmup": sum(1 for t in trial_contexts if t.empty_after_warmup),
         "stats": stats,
@@ -1146,6 +1269,10 @@ def build_config(args: argparse.Namespace) -> Config:
             f"Output file already exists: {output_file}. Use --overwrite to replace it."
         )
 
+    timestamp_bucket_ms: int | None = args.timestamp_bucket_ms
+    if timestamp_bucket_ms is not None and timestamp_bucket_ms <= 0:
+        raise ValueError("--timestamp-bucket-ms must be a positive integer when provided")
+
     return Config(
         collection_path=collection_path,
         project_dir=project_dir,
@@ -1161,6 +1288,7 @@ def build_config(args: argparse.Namespace) -> Config:
         overwrite=args.overwrite,
         fallback_window_ns=args.fallback_window_ns,
         emit_validation_report=args.emit_validation_report,
+        timestamp_bucket_ms=timestamp_bucket_ms,
     )
 
 
@@ -1176,13 +1304,14 @@ def main() -> int:
     LOGGER.info("Pcap dir: %s", cfg.pcap_dir)
     LOGGER.info("Output file: %s", cfg.output_file)
     LOGGER.info(
-        "Options: warmup_ns=%d resource_join=%s resource_max_gap_ns=%s pcap_method=%s exclude_retransmissions=%s strict=%s",
+        "Options: warmup_ns=%d resource_join=%s resource_max_gap_ns=%s pcap_method=%s exclude_retransmissions=%s strict=%s timestamp_bucket_ms=%s",
         cfg.warmup_ns,
         cfg.resource_join,
         cfg.resource_max_gap_ns,
         cfg.pcap_method,
         cfg.exclude_retransmissions,
         cfg.strict,
+        cfg.timestamp_bucket_ms,
     )
 
     manifest = discover_manifest(cfg)
@@ -1194,6 +1323,7 @@ def main() -> int:
         "rows_removed_warmup": 0,
         "trials_empty_after_warmup": 0,
         "duplicate_request_timestamps_collapsed": 0,
+        "bucket_rows_collapsed": 0,
         "trials_missing_or_unreadable_pcap": 0,
         "trials_pcap_parse_error": 0,
         "pcap_router_tshark_fallbacks": 0,
@@ -1211,7 +1341,13 @@ def main() -> int:
     finally:
         router_session.teardown()
 
-    header, rows = build_output_rows(trial_contexts)
+    trial_contexts = maybe_bucket_trial_contexts(
+        trial_contexts,
+        cfg.timestamp_bucket_ms,
+        stats,
+    )
+
+    header, rows = build_output_rows(trial_contexts, cfg.timestamp_bucket_ms)
     assert_numeric_only_non_key_fields(rows, header)
     write_csv(cfg.output_file, header, rows)
 
