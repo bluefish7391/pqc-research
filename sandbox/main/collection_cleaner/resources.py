@@ -24,7 +24,7 @@ def load_resource_samples(path: Path | None, baseline_ns: int | None, prefix: st
                 continue
 
             cpu = parse_percent(rec.get("CPU_Pct"))
-            mem_used, mem_limit = parse_pair_to_bytes(rec.get("Mem_Usage"))
+            mem_used, _mem_limit = parse_pair_to_bytes(rec.get("Mem_Usage"))
             net_rx, net_tx = parse_pair_to_bytes(rec.get("Net_IO_Rx_Tx"))
 
             out_rows.append(
@@ -33,7 +33,6 @@ def load_resource_samples(path: Path | None, baseline_ns: int | None, prefix: st
                     "rel_time_ns": float(ts - baseline_ns),
                     f"{prefix}_cpu_pct": cpu,
                     f"{prefix}_mem_used_bytes": mem_used,
-                    f"{prefix}_mem_limit_bytes": mem_limit,
                     f"{prefix}_net_rx_bytes": net_rx,
                     f"{prefix}_net_tx_bytes": net_tx,
                 }
