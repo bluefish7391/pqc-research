@@ -147,8 +147,8 @@ run_one_combination() {
 
   local locust_cpu_log_file="${run_results_dir}/locust_cpu_matrix_${run_id}.csv"
   local nginx_cpu_log_file="${run_results_dir}/nginx_cpu_matrix_${run_id}.csv"
-  echo "Timestamp,Container,CPU_Pct,Mem_Usage,Net_IO_Rx_Tx" > "${locust_cpu_log_file}"
-  echo "Timestamp,Container,CPU_Pct,Mem_Usage,Net_IO_Rx_Tx" > "${nginx_cpu_log_file}"
+  echo "Timestamp,CPU_Pct,Mem_Usage,Net_IO_Rx_Tx" > "${locust_cpu_log_file}"
+  echo "Timestamp,CPU_Pct,Mem_Usage,Net_IO_Rx_Tx" > "${nginx_cpu_log_file}"
 
   log "Spawning background monitor (waiting for locust to spin up)..."
   (
