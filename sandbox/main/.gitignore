@@ -15,5 +15,6 @@ logs/
 nginx/nginx.conf
 locust/*.log
 
-# venv
+# Python
 .venv/
+__pycache__/
