@@ -145,8 +145,10 @@ run_one_combination() {
     elapsed=$((elapsed + 1))
   done
 
-  local cpu_log_file="${run_results_dir}/cpu_matrix_${run_id}.csv"
-  echo "Timestamp,Container,CPU_Pct,Mem_Usage,Net_IO_Rx_Tx" > "${cpu_log_file}"
+  local locust_cpu_log_file="${run_results_dir}/locust_cpu_matrix_${run_id}.csv"
+  local nginx_cpu_log_file="${run_results_dir}/nginx_cpu_matrix_${run_id}.csv"
+  echo "Timestamp,Container,CPU_Pct,Mem_Usage,Net_IO_Rx_Tx" > "${locust_cpu_log_file}"
+  echo "Timestamp,Container,CPU_Pct,Mem_Usage,Net_IO_Rx_Tx" > "${nginx_cpu_log_file}"
 
   log "Spawning background monitor (waiting for locust to spin up)..."
   (
@@ -170,7 +172,11 @@ run_one_combination() {
       docker stats --no-stream --format '{{.Name}},{{.CPUPerc}},{{.MemUsage}},{{.NetIO}}' oqs-locust oqs-nginx 2>/dev/null \
         | while IFS=',' read -r c_name cpu_perc mem_schema net_io; do
             if [ -n "$c_name" ] && [ -n "$cpu_perc" ] && [ -n "$mem_schema" ]; then
-              echo "${current_time},${c_name},${cpu_perc},${mem_schema},${net_io}" >> "${cpu_log_file}"
+              if [ "$c_name" = "oqs-locust" ]; then
+                echo "${current_time},${cpu_perc},${mem_schema},${net_io}" >> "${locust_cpu_log_file}"
+              elif [ "$c_name" = "oqs-nginx" ]; then
+                echo "${current_time},${cpu_perc},${mem_schema},${net_io}" >> "${nginx_cpu_log_file}"
+              fi
             fi
           done
 
