@@ -5,6 +5,7 @@ certs/
 data/collection_*/
 figures/
 pcaps/
+cleaned-data/*
 
 # Generated files
 locust/__pycache__/
