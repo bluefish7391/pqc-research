@@ -1,0 +1,183 @@
+"""Timestamp bucketing, output assembly, and writers."""
+
+from __future__ import annotations
+
+import csv
+import json
+from pathlib import Path
+
+from .constants import (
+    BUCKET_LAST_METRICS,
+    BUCKET_MEAN_METRICS,
+    BUCKET_ONLY_TRIAL_METRICS,
+    BUCKET_SUM_METRICS,
+    REQUIRED_TRIAL_METRICS,
+)
+from .models import Config, TrialContext
+from .parsing import is_numeric_value, numeric_to_csv
+
+
+def _mean_non_missing(values: list[float | int | None]) -> float | None:
+    nums = [float(v) for v in values if v is not None]
+    if not nums:
+        return None
+    return sum(nums) / len(nums)
+
+
+def _sum_non_missing(values: list[float | int | None]) -> float | None:
+    nums = [float(v) for v in values if v is not None]
+    if not nums:
+        return None
+    return sum(nums)
+
+
+def _last_non_missing(values: list[float | int | None]) -> float | None:
+    for val in reversed(values):
+        if val is not None:
+            return float(val)
+    return None
+
+
+def bucket_trial_rows(
+    rows: list[dict[str, float | int | None]],
+    timestamp_bucket_ms: int,
+) -> list[dict[str, float | int | None]]:
+    if not rows:
+        return []
+
+    bucket_ns = timestamp_bucket_ms * 1_000_000
+    rows_sorted = sorted(rows, key=lambda r: int(r["timestamp_ns"]))
+
+    grouped: dict[int, list[dict[str, float | int | None]]] = {}
+    for row in rows_sorted:
+        ts = int(row["timestamp_ns"])
+        bucket_ts = (ts // bucket_ns) * bucket_ns
+        grouped.setdefault(bucket_ts, []).append(row)
+
+    aggregated_rows: list[dict[str, float | int | None]] = []
+    for bucket_ts in sorted(grouped.keys()):
+        bucket_rows = grouped[bucket_ts]
+        out_row: dict[str, float | int | None] = {"timestamp_ns": bucket_ts}
+
+        for metric in REQUIRED_TRIAL_METRICS:
+            vals = [r.get(metric) for r in bucket_rows]
+            if metric in BUCKET_MEAN_METRICS:
+                out_row[metric] = _mean_non_missing(vals)
+            elif metric in BUCKET_SUM_METRICS:
+                out_row[metric] = _sum_non_missing(vals)
+            elif metric in BUCKET_LAST_METRICS:
+                out_row[metric] = _last_non_missing(vals)
+            else:
+                # Default to deterministic last non-missing if a new metric appears.
+                out_row[metric] = _last_non_missing(vals)
+
+        out_row["requests_in_bucket"] = float(len(bucket_rows))
+        aggregated_rows.append(out_row)
+
+    return aggregated_rows
+
+
+def maybe_bucket_trial_contexts(
+    trial_contexts: list[TrialContext],
+    timestamp_bucket_ms: int | None,
+    stats: dict[str, int],
+) -> list[TrialContext]:
+    if timestamp_bucket_ms is None:
+        return trial_contexts
+
+    bucketed_contexts: list[TrialContext] = []
+    for ctx in trial_contexts:
+        original_len = len(ctx.rows)
+        bucketed_rows = bucket_trial_rows(ctx.rows, timestamp_bucket_ms)
+        stats["bucket_rows_collapsed"] += max(0, original_len - len(bucketed_rows))
+        bucketed_contexts.append(
+            TrialContext(
+                trial=ctx.trial,
+                rows=bucketed_rows,
+                empty_after_warmup=ctx.empty_after_warmup,
+            )
+        )
+
+    return bucketed_contexts
+
+
+def prefix_trial_columns(trial: str, row: dict[str, float | int | None]) -> dict[str, float | int | None]:
+    prefixed: dict[str, float | int | None] = {"timestamp_ns": row["timestamp_ns"]}
+    for key, value in row.items():
+        if key == "timestamp_ns":
+            continue
+        prefixed[f"{trial}__{key}"] = value
+    return prefixed
+
+
+def build_output_rows(
+    trial_contexts: list[TrialContext],
+    timestamp_bucket_ms: int | None,
+) -> tuple[list[str], list[dict[str, float | int | None]]]:
+    # Outer-join all trial frames on timestamp_ns using dict accumulation.
+    merged: dict[int, dict[str, float | int | None]] = {}
+
+    for ctx in trial_contexts:
+        for row in ctx.rows:
+            prefixed = prefix_trial_columns(ctx.trial, row)
+            ts = int(prefixed["timestamp_ns"])
+            if ts not in merged:
+                merged[ts] = {"timestamp_ns": ts}
+            merged[ts].update(prefixed)
+
+    sorted_trials = sorted(ctx.trial for ctx in trial_contexts)
+
+    header = ["timestamp_ns"]
+    trial_metrics = list(REQUIRED_TRIAL_METRICS)
+    if timestamp_bucket_ms is not None:
+        trial_metrics.extend(BUCKET_ONLY_TRIAL_METRICS)
+
+    for trial in sorted_trials:
+        for metric in trial_metrics:
+            header.append(f"{trial}__{metric}")
+
+    output_rows = [merged[ts] for ts in sorted(merged.keys())]
+
+    return header, output_rows
+
+
+def assert_numeric_only_non_key_fields(
+    rows: list[dict[str, float | int | None]], header: list[str]
+) -> None:
+    for row in rows:
+        for col in header:
+            if col == "timestamp_ns":
+                continue
+            value = row.get(col)
+            if not is_numeric_value(value):
+                raise ValueError(f"Non-numeric value encountered in column '{col}': {value!r}")
+
+
+def write_csv(path: Path, header: list[str], rows: list[dict[str, float | int | None]]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(header)
+        for row in rows:
+            writer.writerow([numeric_to_csv(row.get(col)) for col in header])
+
+
+def write_validation_report(
+    output_file: Path,
+    cfg: Config,
+    trial_contexts: list[TrialContext],
+    stats: dict[str, int],
+) -> Path:
+    report_path = output_file.with_suffix(".validation.json")
+    report = {
+        "collection": cfg.collection_path.name,
+        "output_file": str(output_file),
+        "timestamp_bucket_enabled": cfg.timestamp_bucket_ms is not None,
+        "timestamp_bucket_ms": cfg.timestamp_bucket_ms,
+        "trials_discovered": len(trial_contexts),
+        "trials_empty_after_warmup": sum(1 for t in trial_contexts if t.empty_after_warmup),
+        "stats": stats,
+    }
+    with report_path.open("w", encoding="utf-8") as f:
+        json.dump(report, f, indent=2, sort_keys=True)
+    return report_path
