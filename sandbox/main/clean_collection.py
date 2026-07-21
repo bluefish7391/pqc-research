@@ -8,6 +8,7 @@ import csv
 import json
 import logging
 import math
+import os
 import re
 import shutil
 import subprocess
@@ -92,6 +93,7 @@ class RequestRow:
 @dataclass
 class Config:
     collection_path: Path
+    project_dir: Path
     results_dir: Path
     pcap_dir: Path
     output_file: Path
@@ -104,6 +106,154 @@ class Config:
     overwrite: bool
     fallback_window_ns: int
     emit_validation_report: bool
+
+
+class RouterTsharkSession:
+    def __init__(self, project_dir: Path, pcap_dir: Path):
+        self.project_dir = project_dir
+        self.pcap_dir = pcap_dir.resolve()
+        self.started = False
+        self.force_container_tshark = False
+
+    def _compose_env(self) -> dict[str, str]:
+        env = os.environ.copy()
+        env["PCAP_DIR"] = str(self.pcap_dir)
+        return env
+
+    def _run(self, args: list[str]) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            args,
+            cwd=self.project_dir,
+            env=self._compose_env(),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+    def ensure_started(self) -> None:
+        if self.started:
+            return
+
+        up_cmd = [
+            "docker",
+            "compose",
+            "up",
+            "-d",
+            "--force-recreate",
+            "--no-deps",
+            "router",
+        ]
+        proc = self._run(up_cmd)
+        if proc.returncode != 0:
+            raise RuntimeError(
+                "Failed to start router container for pcap parsing: "
+                f"{proc.stderr.strip() or proc.stdout.strip()}"
+            )
+        self.started = True
+
+    def extract_packets(self, pcap_path: Path) -> tuple[list[dict[str, Any]] | None, int | None]:
+        self.ensure_started()
+
+        container_pcap = f"/mnt/pcaps/{pcap_path.name}"
+        cmd = [
+            "docker",
+            "compose",
+            "exec",
+            "-T",
+            "router",
+            "tshark",
+            "-r",
+            container_pcap,
+            "-T",
+            "fields",
+            "-e",
+            "frame.time_epoch",
+            "-e",
+            "tcp.stream",
+            "-e",
+            "ip.src",
+            "-e",
+            "tcp.srcport",
+            "-e",
+            "ip.dst",
+            "-e",
+            "tcp.dstport",
+            "-e",
+            "tcp.analysis.retransmission",
+            "-e",
+            "tcp.analysis.fast_retransmission",
+            "-e",
+            "tcp.analysis.spurious_retransmission",
+            "-E",
+            "separator=,",
+            "-E",
+            "header=n",
+        ]
+
+        proc = self._run(cmd)
+        if proc.returncode != 0:
+            LOGGER.warning(
+                "router-container tshark parse failed for '%s': %s",
+                pcap_path,
+                proc.stderr.strip() or proc.stdout.strip(),
+            )
+            return (None, 5)
+
+        return (parse_tshark_csv(proc.stdout), None)
+
+    def teardown(self) -> None:
+        if not self.started:
+            return
+
+        stop_proc = self._run(["docker", "compose", "stop", "router"])
+        if stop_proc.returncode != 0:
+            LOGGER.warning(
+                "Failed stopping router container after pcap parsing: %s",
+                stop_proc.stderr.strip() or stop_proc.stdout.strip(),
+            )
+
+        rm_proc = self._run(["docker", "compose", "rm", "-f", "router"])
+        if rm_proc.returncode != 0:
+            LOGGER.warning(
+                "Failed removing router container after pcap parsing: %s",
+                rm_proc.stderr.strip() or rm_proc.stdout.strip(),
+            )
+
+
+def parse_tshark_csv(stdout: str) -> list[dict[str, Any]]:
+    packets: list[dict[str, Any]] = []
+    reader = csv.reader(stdout.splitlines())
+    for row in reader:
+        if len(row) < 9:
+            continue
+
+        try:
+            epoch = float(row[0])
+            stream = int(row[1])
+        except (TypeError, ValueError):
+            continue
+
+        src_ip = row[2].strip()
+        dst_ip = row[4].strip()
+        direction = classify_direction(src_ip, dst_ip)
+        retrans = any(parse_boolish_field(r) for r in row[6:9])
+
+        packets.append(
+            {
+                "time_ns": int(epoch * 1_000_000_000),
+                "stream": stream,
+                "direction": direction,
+                "retrans": retrans,
+            }
+        )
+
+    packets.sort(key=lambda p: (p["time_ns"], p["stream"]))
+    return packets
+
+
+def is_tshark_permission_denied(stderr: str) -> bool:
+    text = stderr.lower()
+    return "permission" in text and "read the file" in text
 
 
 def parse_args() -> argparse.Namespace:
@@ -593,9 +743,20 @@ def build_request_windows(
     return windows
 
 
-def run_tshark_extract(pcap_path: Path) -> tuple[list[dict[str, Any]] | None, int | None]:
+def run_tshark_extract(
+    pcap_path: Path,
+    router_session: RouterTsharkSession | None,
+    stats: dict[str, int],
+) -> tuple[list[dict[str, Any]] | None, int | None]:
+    if router_session is not None and router_session.force_container_tshark:
+        stats["pcap_router_tshark_fallbacks"] += 1
+        return router_session.extract_packets(pcap_path)
+
     tshark_bin = shutil.which("tshark")
     if not tshark_bin:
+        if router_session is not None:
+            stats["pcap_router_tshark_fallbacks"] += 1
+            return router_session.extract_packets(pcap_path)
         return (None, 5)
 
     cmd = [
@@ -631,40 +792,24 @@ def run_tshark_extract(pcap_path: Path) -> tuple[list[dict[str, Any]] | None, in
     try:
         proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
     except OSError:
+        if router_session is not None:
+            stats["pcap_router_tshark_fallbacks"] += 1
+            return router_session.extract_packets(pcap_path)
         return (None, 5)
 
     if proc.returncode != 0:
+        if router_session is not None and is_tshark_permission_denied(proc.stderr):
+            router_session.force_container_tshark = True
+            LOGGER.warning(
+                "Host tshark cannot read workspace pcap files; using router container for remaining pcap parsing in this run. First failing file: '%s'.",
+                pcap_path,
+            )
+            stats["pcap_router_tshark_fallbacks"] += 1
+            return router_session.extract_packets(pcap_path)
         LOGGER.warning("tshark parse failed for '%s': %s", pcap_path, proc.stderr.strip())
         return (None, 5)
 
-    packets: list[dict[str, Any]] = []
-    reader = csv.reader(proc.stdout.splitlines())
-    for row in reader:
-        if len(row) < 9:
-            continue
-
-        try:
-            epoch = float(row[0])
-            stream = int(row[1])
-        except (TypeError, ValueError):
-            continue
-
-        src_ip = row[2].strip()
-        dst_ip = row[4].strip()
-        direction = classify_direction(src_ip, dst_ip)
-        retrans = any(parse_boolish_field(r) for r in row[6:9])
-
-        packets.append(
-            {
-                "time_ns": int(epoch * 1_000_000_000),
-                "stream": stream,
-                "direction": direction,
-                "retrans": retrans,
-            }
-        )
-
-    packets.sort(key=lambda p: (p["time_ns"], p["stream"]))
-    return (packets, None)
+    return (parse_tshark_csv(proc.stdout), None)
 
 
 def packet_nan_rows(requests: list[RequestRow], code: int) -> list[dict[str, float | None]]:
@@ -686,6 +831,7 @@ def count_packets_per_request(
     exclude_retransmissions: bool,
     fallback_window_ns: int,
     stats: dict[str, int],
+    router_session: RouterTsharkSession | None,
 ) -> list[dict[str, float | None]]:
     if not requests:
         return []
@@ -697,7 +843,7 @@ def count_packets_per_request(
     if baseline_ns is None:
         return packet_nan_rows(requests, 4)
 
-    packets_abs, error_code = run_tshark_extract(pcap_path)
+    packets_abs, error_code = run_tshark_extract(pcap_path, router_session, stats)
     if packets_abs is None:
         stats["trials_pcap_parse_error"] += 1
         return packet_nan_rows(requests, error_code if error_code is not None else 5)
@@ -821,7 +967,12 @@ def merge_metric_rows(*metric_sets: Iterable[dict[str, float | int | None]]) -> 
     return merged
 
 
-def process_trial(art: TrialArtifacts, cfg: Config, stats: dict[str, int]) -> TrialContext:
+def process_trial(
+    art: TrialArtifacts,
+    cfg: Config,
+    stats: dict[str, int],
+    router_session: RouterTsharkSession | None,
+) -> TrialContext:
     if art.requests_csv is None:
         if cfg.strict:
             raise FileNotFoundError(f"Trial '{art.trial}' missing requests CSV")
@@ -877,6 +1028,7 @@ def process_trial(art: TrialArtifacts, cfg: Config, stats: dict[str, int]) -> Tr
         cfg.exclude_retransmissions,
         cfg.fallback_window_ns,
         stats,
+        router_session,
     )
 
     merged_rows = merge_metric_rows(base_metrics, locust_aligned, nginx_aligned, pcap_rows)
@@ -983,6 +1135,7 @@ def write_validation_report(
 
 def build_config(args: argparse.Namespace) -> Config:
     collection_path = resolve_collection_path(args.collection, args.data_root)
+    project_dir = Path(__file__).resolve().parent
     results_dir = collection_path / "results"
     pcap_dir = collection_path / "pcaps"
     output_dir = Path(args.output_dir).expanduser().resolve()
@@ -995,6 +1148,7 @@ def build_config(args: argparse.Namespace) -> Config:
 
     return Config(
         collection_path=collection_path,
+        project_dir=project_dir,
         results_dir=results_dir,
         pcap_dir=pcap_dir,
         output_file=output_file,
@@ -1042,15 +1196,20 @@ def main() -> int:
         "duplicate_request_timestamps_collapsed": 0,
         "trials_missing_or_unreadable_pcap": 0,
         "trials_pcap_parse_error": 0,
+        "pcap_router_tshark_fallbacks": 0,
         "pcap_heuristic_stream_matches": 0,
         "pcap_ambiguous_stream_matches": 0,
     }
 
+    router_session = RouterTsharkSession(cfg.project_dir, cfg.pcap_dir)
     trial_contexts: list[TrialContext] = []
-    for art in sorted(manifest, key=lambda x: x.trial):
-        LOGGER.info("Processing trial: %s", art.trial)
-        ctx = process_trial(art, cfg, stats)
-        trial_contexts.append(ctx)
+    try:
+        for art in sorted(manifest, key=lambda x: x.trial):
+            LOGGER.info("Processing trial: %s", art.trial)
+            ctx = process_trial(art, cfg, stats, router_session)
+            trial_contexts.append(ctx)
+    finally:
+        router_session.teardown()
 
     header, rows = build_output_rows(trial_contexts)
     assert_numeric_only_non_key_fields(rows, header)
