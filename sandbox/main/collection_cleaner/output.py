@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import csv
 import json
+import math
 from pathlib import Path
+from statistics import median
 
 from .constants import (
     BUCKET_LAST_METRICS,
@@ -15,6 +17,9 @@ from .constants import (
 )
 from .models import Config, TrialContext
 from .parsing import is_numeric_value, numeric_to_csv
+
+
+SCALE_TARGET_MAGNITUDE = 10_000_000_000
 
 
 def _mean_non_missing(values: list[float | int | None]) -> float | None:
@@ -141,6 +146,77 @@ def build_output_rows(
     return header, output_rows
 
 
+def _metric_suffix(column_name: str) -> str:
+    if "__" not in column_name:
+        return column_name
+    return column_name.split("__", 1)[1]
+
+
+def derive_metric_scale_exponents(
+    rows: list[dict[str, float | int | None]],
+    header: list[str],
+    target_magnitude: int = SCALE_TARGET_MAGNITUDE,
+) -> dict[str, int]:
+    suffix_values: dict[str, list[float]] = {}
+
+    for col in header:
+        if col != "timestamp_ns":
+            suffix_values.setdefault(_metric_suffix(col), [])
+
+    for row in rows:
+        for col in header:
+            if col == "timestamp_ns":
+                continue
+            value = row.get(col)
+            if not is_numeric_value(value) or value is None:
+                continue
+            numeric_value = float(value)
+            if numeric_value == 0.0:
+                continue
+            suffix_values.setdefault(_metric_suffix(col), []).append(abs(numeric_value))
+
+    scale_exponents: dict[str, int] = {}
+    for suffix, values in suffix_values.items():
+        if not values:
+            scale_exponents[suffix] = 0
+            continue
+        representative = median(values)
+        if representative <= 0:
+            scale_exponents[suffix] = 0
+            continue
+        exponent = int(round(math.log10(target_magnitude / representative)))
+        scale_exponents[suffix] = max(0, exponent)
+
+    return scale_exponents
+
+
+def scale_output_rows(
+    rows: list[dict[str, float | int | None]],
+    header: list[str],
+    scale_exponents: dict[str, int],
+) -> list[dict[str, float | int | None]]:
+    if not scale_exponents:
+        return rows
+
+    scaled_rows: list[dict[str, float | int | None]] = []
+    for row in rows:
+        scaled_row: dict[str, float | int | None] = {}
+        for col in header:
+            value = row.get(col)
+            if col == "timestamp_ns" or value is None:
+                scaled_row[col] = value
+                continue
+
+            exponent = scale_exponents.get(_metric_suffix(col), 0)
+            if exponent <= 0:
+                scaled_row[col] = value
+            else:
+                scaled_row[col] = float(value) * (10 ** exponent)
+        scaled_rows.append(scaled_row)
+
+    return scaled_rows
+
+
 def assert_numeric_only_non_key_fields(
     rows: list[dict[str, float | int | None]], header: list[str]
 ) -> None:
@@ -167,6 +243,7 @@ def write_validation_report(
     cfg: Config,
     trial_contexts: list[TrialContext],
     stats: dict[str, int],
+    scale_exponents: dict[str, int] | None = None,
 ) -> Path:
     report_path = output_file.with_suffix(".validation.json")
     report = {
@@ -174,6 +251,8 @@ def write_validation_report(
         "output_file": str(output_file),
         "timestamp_bucket_enabled": cfg.timestamp_bucket_ms is not None,
         "timestamp_bucket_ms": cfg.timestamp_bucket_ms,
+        "scale_to_billions": cfg.scale_to_billions,
+        "metric_scale_exponents": scale_exponents or {},
         "trials_discovered": len(trial_contexts),
         "trials_empty_after_warmup": sum(1 for t in trial_contexts if t.empty_after_warmup),
         "stats": stats,

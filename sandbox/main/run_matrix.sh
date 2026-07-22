@@ -40,11 +40,11 @@ USER_LEVELS=(1 50 100) # Number of concurrent users to simulate in Locust. This 
 RTTS=(0 10 25)         # Round-trip time in milliseconds. This is the artificial latency that will be introduced in the network emulation.
 LOSS_LEVELS=(0 1 2)  # Packet loss percentage. This is the percentage of packets that will be randomly dropped in the network emulation.
 
-TARGET_HANDSHAKES=1000 # Total number of handshakes to perform in each trial.
-MAX_DURATION="120s" # Headless Locust run max duration per combination (seconds).
+TARGET_HANDSHAKES=1000000 # Total number of handshakes to perform in each trial.
+MAX_DURATION="300s" # Headless Locust run max duration per combination (seconds).
 REPETITIONS_PER_TEST=1 # Number of times to repeat each combination for averaging or variance analysis.
 TRIALS_TO_SKIP_AT_START=0 # Number of initial trials to skip (useful for resuming an interrupted sweep).
-TRIALS_TO_SKIP_AT_END=0 # Number of final trials to skip (useful for resuming an interrupted sweep).
+TRIALS_TO_SKIP_AT_END=53 # Number of final trials to skip (useful for resuming an interrupted sweep).
 
 # Identifies the name of this file, then the directory containing said file, and sets PROJECT_DIR to that path.
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

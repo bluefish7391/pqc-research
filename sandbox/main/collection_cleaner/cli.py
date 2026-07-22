@@ -95,6 +95,11 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="Optional output-only timestamp bucketing (floor to N millisecond buckets)",
     )
+    parser.add_argument(
+        "--scale-to-billions",
+        action="store_true",
+        help="Scale numeric metric columns up by derived powers of 10 before writing the CSV",
+    )
     return parser.parse_args()
 
 
@@ -152,4 +157,5 @@ def build_config(args: argparse.Namespace) -> Config:
         fallback_window_ns=args.fallback_window_ns,
         emit_validation_report=args.emit_validation_report,
         timestamp_bucket_ms=timestamp_bucket_ms,
+        scale_to_billions=args.scale_to_billions,
     )

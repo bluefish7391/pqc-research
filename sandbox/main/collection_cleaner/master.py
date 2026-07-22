@@ -9,7 +9,9 @@ from .cli import build_config, parse_args, setup_logging
 from .output import (
     assert_numeric_only_non_key_fields,
     build_output_rows,
+    derive_metric_scale_exponents,
     maybe_bucket_trial_contexts,
+    scale_output_rows,
     write_csv,
     write_validation_report,
 )
@@ -75,6 +77,11 @@ def main() -> int:
     )
 
     header, rows = build_output_rows(trial_contexts, cfg.timestamp_bucket_ms)
+    scale_exponents: dict[str, int] = {}
+    if cfg.scale_to_billions:
+        scale_exponents = derive_metric_scale_exponents(rows, header)
+        rows = scale_output_rows(rows, header, scale_exponents)
+
     assert_numeric_only_non_key_fields(rows, header)
     write_csv(cfg.output_file, header, rows)
 
@@ -82,7 +89,13 @@ def main() -> int:
     LOGGER.info("Output rows: %d", len(rows))
 
     if cfg.emit_validation_report:
-        report_path = write_validation_report(cfg.output_file, cfg, trial_contexts, stats)
+        report_path = write_validation_report(
+            cfg.output_file,
+            cfg,
+            trial_contexts,
+            stats,
+            scale_exponents,
+        )
         LOGGER.info("Validation report written: %s", report_path)
 
     return 0

@@ -51,3 +51,4 @@ class Config:
     fallback_window_ns: int
     emit_validation_report: bool
     timestamp_bucket_ms: int | None
+    scale_to_billions: bool
