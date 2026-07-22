@@ -47,6 +47,7 @@ def bucket_trial_rows(
     rows: list[dict[str, float | int | None]],
     timestamp_bucket_ms: int,
 ) -> list[dict[str, float | int | None]]:
+    """Aggregate per-request rows into deterministic fixed-width time buckets."""
     if not rows:
         return []
 
@@ -87,6 +88,7 @@ def maybe_bucket_trial_contexts(
     timestamp_bucket_ms: int | None,
     stats: dict[str, int],
 ) -> list[TrialContext]:
+    """Apply optional per-trial timestamp bucketing and track row collapse stats."""
     if timestamp_bucket_ms is None:
         return trial_contexts
 
@@ -107,6 +109,7 @@ def maybe_bucket_trial_contexts(
 
 
 def prefix_trial_columns(trial: str, row: dict[str, float | int | None]) -> dict[str, float | int | None]:
+    """Namespace one trial's metric columns so cross-trial merges do not collide."""
     prefixed: dict[str, float | int | None] = {"timestamp_ns": row["timestamp_ns"]}
     for key, value in row.items():
         if key == "timestamp_ns":
@@ -119,6 +122,7 @@ def build_output_rows(
     trial_contexts: list[TrialContext],
     timestamp_bucket_ms: int | None,
 ) -> tuple[list[str], list[dict[str, float | int | None]]]:
+    """Outer-join all trial rows by timestamp and build deterministic column order."""
     # Outer-join all trial frames on timestamp_ns using dict accumulation.
     merged: dict[int, dict[str, float | int | None]] = {}
 
@@ -157,6 +161,7 @@ def derive_metric_scale_exponents(
     header: list[str],
     target_magnitude: int = SCALE_TARGET_MAGNITUDE,
 ) -> dict[str, int]:
+    """Choose per-metric powers of 10 so values land near a target magnitude."""
     suffix_values: dict[str, list[float]] = {}
 
     for col in header:
@@ -195,6 +200,7 @@ def scale_output_rows(
     header: list[str],
     scale_exponents: dict[str, int],
 ) -> list[dict[str, float | int | None]]:
+    """Apply derived scaling exponents while leaving missing values untouched."""
     if not scale_exponents:
         return rows
 
@@ -220,6 +226,7 @@ def scale_output_rows(
 def assert_numeric_only_non_key_fields(
     rows: list[dict[str, float | int | None]], header: list[str]
 ) -> None:
+    """Guardrail to ensure emitted metric cells are numeric-or-empty only."""
     for row in rows:
         for col in header:
             if col == "timestamp_ns":
@@ -230,6 +237,7 @@ def assert_numeric_only_non_key_fields(
 
 
 def write_csv(path: Path, header: list[str], rows: list[dict[str, float | int | None]]) -> None:
+    """Write deterministic CSV output with stable header order."""
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", newline="") as f:
         writer = csv.writer(f)
@@ -245,6 +253,7 @@ def write_validation_report(
     stats: dict[str, int],
     scale_exponents: dict[str, int] | None = None,
 ) -> Path:
+    """Write a sidecar JSON report summarizing run options and key counters."""
     report_path = output_file.with_suffix(".validation.json")
     report = {
         "collection": cfg.collection_path.name,

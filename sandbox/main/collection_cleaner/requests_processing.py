@@ -14,12 +14,14 @@ LOGGER = logging.getLogger("clean_collection")
 
 
 def load_requests(path: Path) -> list[dict[str, str]]:
+    """Load raw request rows exactly as emitted by Locust results files."""
     with path.open("r", newline="") as f:
         reader = csv.DictReader(f)
         return list(reader)
 
 
 def _parse_start_times(rows: list[dict[str, str]]) -> list[int]:
+    """Extract parseable start timestamps used to anchor warm-up filtering."""
     return [start for start in (parse_int(r.get("start_time_ns")) for r in rows) if start is not None]
 
 
@@ -28,6 +30,7 @@ def _apply_warmup_filter(
     warmup_cutoff_ns: int,
     stats: dict[str, int],
 ) -> list[tuple[dict[str, str], int]]:
+    """Drop rows before warm-up cutoff while accounting for parse failures."""
     filtered_raw: list[tuple[dict[str, str], int]] = []
     for row in rows:
         start = parse_int(row.get("start_time_ns"))
@@ -43,6 +46,7 @@ def _apply_post_warmup_limit(
     filtered_raw: list[tuple[dict[str, str], int]],
     stats: dict[str, int],
 ) -> list[tuple[dict[str, str], int]]:
+    """Keep only the earliest post-warmup handshake window for consistent horizons."""
     if len(filtered_raw) < POST_WARMUP_HANDSHAKE_LIMIT:
         return filtered_raw
 
@@ -57,6 +61,7 @@ def _normalize_rows(
     filtered_raw: list[tuple[dict[str, str], int]],
     baseline_ns: int,
 ) -> list[RequestRow]:
+    """Map CSV records into typed rows with trial-relative timestamps."""
     normalized: list[RequestRow] = []
     for row, start in filtered_raw:
         normalized.append(
@@ -77,6 +82,7 @@ def _dedupe_by_timestamp(
     normalized: list[RequestRow],
     stats: dict[str, int],
 ) -> list[RequestRow]:
+    """Collapse duplicate normalized timestamps deterministically."""
     # Deterministic duplicate collapse by timestamp after sorting.
     deduped: list[RequestRow] = []
     seen_timestamps: set[int] = set()
@@ -92,6 +98,7 @@ def _dedupe_by_timestamp(
 def filter_and_normalize_requests(
     rows: list[dict[str, str]], warmup_ns: int, trial: str, stats: dict[str, int]
 ) -> tuple[list[RequestRow], int | None, bool]:
+    """Prepare request rows for downstream alignment and packet matching."""
     starts = _parse_start_times(rows)
     if not starts:
         LOGGER.warning("Trial '%s' has no parseable start_time_ns values.", trial)
@@ -110,6 +117,7 @@ def filter_and_normalize_requests(
         stats["trials_empty_after_warmup"] += 1
         return ([], None, True)
 
+    # Enforce the post-warmup request horizon used by all downstream metrics.
     filtered_raw = _apply_post_warmup_limit(filtered_raw, stats)
 
     baseline_ns = min(start for _, start in filtered_raw)

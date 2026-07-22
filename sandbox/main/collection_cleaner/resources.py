@@ -14,6 +14,7 @@ SAMPLE_TIME_FIELDS = {"sample_time_ns", "rel_time_ns"}
 
 
 def load_resource_samples(path: Path | None, baseline_ns: int | None, prefix: str) -> list[dict[str, float]]:
+    """Load and normalize docker stats samples to trial-relative timestamps."""
     if path is None or baseline_ns is None:
         return []
 
@@ -56,6 +57,7 @@ def _find_unassigned_backward(
     request_times: list[int],
     assigned: set[int],
 ) -> int | None:
+    """Pick the first unassigned request at/after the sample timestamp."""
     idx = bisect_left(request_times, sample_ts)
     while idx < len(request_times) and idx in assigned:
         idx += 1
@@ -69,6 +71,7 @@ def _find_unassigned_forward(
     request_times: list[int],
     assigned: set[int],
 ) -> int | None:
+    """Pick the first unassigned request at/before the sample timestamp."""
     idx = bisect_right(request_times, sample_ts) - 1
     while idx >= 0 and idx in assigned:
         idx -= 1
@@ -82,6 +85,7 @@ def _find_unassigned_nearest(
     request_times: list[int],
     assigned: set[int],
 ) -> int | None:
+    """Pick the nearest unassigned request around the sample timestamp."""
     if not request_times:
         return None
 
@@ -121,6 +125,7 @@ def _select_request_index_for_sample(
     assigned: set[int],
     strategy: str,
 ) -> int | None:
+    """Dispatch sample-to-request matching based on configured strategy."""
     if strategy == "backward":
         return _find_unassigned_backward(sample_ts, request_times, assigned)
     if strategy == "forward":
@@ -134,6 +139,7 @@ def _select_request_index_for_sample(
 def _build_empty_aligned_rows(
     request_count: int, metric_fields: list[str]
 ) -> list[dict[str, float | None]]:
+    """Pre-build output rows with None values for all resource metrics."""
     aligned: list[dict[str, float | None]] = []
     for _ in range(request_count):
         row: dict[str, float | None] = {"resource_gap_ns": None}
@@ -172,6 +178,7 @@ def align_resource_series(
         if req_idx is None:
             continue
 
+        # Optional staleness guard rejects assignments that are too far apart in time.
         gap = abs(request_times[req_idx] - sample_ts)
         if max_gap_ns is not None and gap > max_gap_ns:
             continue

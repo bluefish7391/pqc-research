@@ -46,6 +46,8 @@ TSHARK_FIELD_ARGS = [
 
 
 class RouterTsharkSession:
+    """Manage router container lifecycle for tshark fallback parsing."""
+
     def __init__(self, project_dir: Path, pcap_dir: Path):
         self.project_dir = project_dir
         self.pcap_dir = pcap_dir.resolve()
@@ -68,6 +70,7 @@ class RouterTsharkSession:
         )
 
     def ensure_started(self) -> None:
+        """Start router container once per run when fallback parsing is needed."""
         if self.started:
             return
 
@@ -89,6 +92,7 @@ class RouterTsharkSession:
         self.started = True
 
     def extract_packets(self, pcap_path: Path) -> tuple[list[dict[str, Any]] | None, int | None]:
+        """Extract packet fields via tshark inside the router container."""
         self.ensure_started()
 
         container_pcap = f"/mnt/pcaps/{pcap_path.name}"
@@ -116,6 +120,7 @@ class RouterTsharkSession:
         return (parse_tshark_csv(proc.stdout), None)
 
     def teardown(self) -> None:
+        """Stop and remove fallback container resources created for parsing."""
         if not self.started:
             return
 
@@ -135,6 +140,7 @@ class RouterTsharkSession:
 
 
 def classify_direction(src_ip: str, dst_ip: str) -> str | None:
+    """Map packet direction relative to configured client/server endpoints."""
     if src_ip == CLIENT_IP and dst_ip == SERVER_IP:
         return "c2s"
     if src_ip == SERVER_IP and dst_ip == CLIENT_IP:
@@ -143,6 +149,7 @@ def classify_direction(src_ip: str, dst_ip: str) -> str | None:
 
 
 def parse_tshark_csv(stdout: str) -> list[dict[str, Any]]:
+    """Parse tshark CSV lines into normalized packet dictionaries."""
     packets: list[dict[str, Any]] = []
     reader = csv.reader(stdout.splitlines())
     for row in reader:
@@ -174,6 +181,7 @@ def parse_tshark_csv(stdout: str) -> list[dict[str, Any]]:
 
 
 def is_tshark_permission_denied(stderr: str) -> bool:
+    """Detect host filesystem permission failures from tshark stderr."""
     text = stderr.lower()
     return "permission" in text and "read the file" in text
 
@@ -181,6 +189,7 @@ def is_tshark_permission_denied(stderr: str) -> bool:
 def build_request_windows(
     requests: list[RequestRow], fallback_window_ns: int
 ) -> list[tuple[int, int]]:
+    """Build request time windows used to assign packet candidates per request."""
     windows: list[tuple[int, int]] = []
     for idx, row in enumerate(requests):
         start = row.timestamp_ns
@@ -200,6 +209,7 @@ def run_tshark_extract(
     router_session: RouterTsharkSession | None,
     stats: dict[str, int],
 ) -> tuple[list[dict[str, Any]] | None, int | None]:
+    """Run tshark on host first, with router-container fallback when necessary."""
     if router_session is not None and router_session.force_container_tshark:
         stats["pcap_router_tshark_fallbacks"] += 1
         return router_session.extract_packets(pcap_path)
@@ -242,6 +252,7 @@ def run_tshark_extract(
 
 
 def packet_nan_rows(requests: list[RequestRow], code: int) -> list[dict[str, float | None]]:
+    """Return sentinel rows used when packet extraction cannot be completed."""
     return [
         {
             "packets_client_to_server_per_request": None,
@@ -254,6 +265,7 @@ def packet_nan_rows(requests: list[RequestRow], code: int) -> list[dict[str, flo
 
 
 def _empty_packet_metrics_row() -> dict[str, float | None]:
+    """Return an empty per-request packet metrics row for no-match cases."""
     return {
         "packets_client_to_server_per_request": None,
         "packets_server_to_client_per_request": None,
@@ -271,6 +283,7 @@ def count_packets_per_request(
     stats: dict[str, int],
     router_session: RouterTsharkSession | None,
 ) -> list[dict[str, float | None]]:
+    """Count request-scoped packets and emit quality-coded packet metrics rows."""
     if not requests:
         return []
 
@@ -306,6 +319,7 @@ def count_packets_per_request(
     out_rows: list[dict[str, float | None]] = []
 
     for idx, _req in enumerate(requests):
+        # Narrow to packets whose relative timestamp falls within this request window.
         win_start, win_end = windows[idx]
         start_idx = bisect_left(packet_times, win_start)
         end_idx = bisect_left(packet_times, win_end)

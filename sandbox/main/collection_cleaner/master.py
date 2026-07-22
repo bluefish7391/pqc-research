@@ -23,6 +23,7 @@ LOGGER = logging.getLogger("clean_collection")
 
 
 def _log_config(cfg: Config) -> None:
+    """Emit a concise run summary before processing starts."""
     LOGGER.info("Collection: %s", cfg.collection_path.name)
     LOGGER.info("Collection path: %s", cfg.collection_path)
     LOGGER.info("Results dir: %s", cfg.results_dir)
@@ -41,6 +42,7 @@ def _log_config(cfg: Config) -> None:
 
 
 def _build_stats() -> dict[str, int]:
+    """Initialize mutable counters used for validation and troubleshooting."""
     return {
         "request_rows_parse_dropped": 0,
         "rows_removed_warmup": 0,
@@ -62,6 +64,7 @@ def _process_trials(
     stats: dict[str, int],
     router_session: RouterTsharkSession,
 ) -> list[TrialContext]:
+    """Run per-trial processing and always tear down router resources."""
     trial_contexts: list[TrialContext] = []
     # Keep container lifecycle centralized so every path tears down cleanly.
     try:
@@ -74,32 +77,39 @@ def _process_trials(
 
 
 def main() -> int:
+    """Execute the full cleaning pipeline from CLI args to final CSV."""
+    # 1) Parse CLI inputs and establish runtime configuration.
     args = parse_args()
     setup_logging(args.log_level)
 
     cfg = build_config(args)
     _log_config(cfg)
 
+    # 2) Discover trial inputs and validate required artifacts.
     manifest = discover_manifest(cfg)
     if not manifest:
         raise RuntimeError(f"No trial directories found under {cfg.results_dir}")
 
+    # 3) Process each trial into a normalized per-timestamp metric frame.
     stats = _build_stats()
     router_session = RouterTsharkSession(cfg.project_dir, cfg.pcap_dir)
     trial_contexts = _process_trials(manifest, cfg, stats, router_session)
 
+    # 4) Optionally bucket timestamps before cross-trial merge.
     trial_contexts = maybe_bucket_trial_contexts(
         trial_contexts,
         cfg.timestamp_bucket_ms,
         stats,
     )
 
+    # 5) Outer-join all trials and optionally rescale numeric magnitudes.
     header, rows = build_output_rows(trial_contexts, cfg.timestamp_bucket_ms)
     scale_exponents: dict[str, int] = {}
     if cfg.scale_to_billions:
         scale_exponents = derive_metric_scale_exponents(rows, header)
         rows = scale_output_rows(rows, header, scale_exponents)
 
+    # 6) Validate output shape and emit final artifacts.
     assert_numeric_only_non_key_fields(rows, header)
     write_csv(cfg.output_file, header, rows)
 

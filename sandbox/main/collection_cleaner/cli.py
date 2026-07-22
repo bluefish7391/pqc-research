@@ -14,6 +14,7 @@ NS_PER_SECOND = 1_000_000_000
 
 
 def _build_parser() -> argparse.ArgumentParser:
+    """Define all supported CLI options for one cleaning run."""
     script_dir = Path(__file__).resolve().parent.parent
     parser = argparse.ArgumentParser(
         description="Clean one collection and emit one deterministic consolidated CSV"
@@ -108,10 +109,12 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 def parse_args() -> argparse.Namespace:
+    """Parse CLI arguments for the collection cleaner entrypoint."""
     return _build_parser().parse_args()
 
 
 def setup_logging(level: str) -> None:
+    """Configure consistent timestamped logging for pipeline stages."""
     logging.basicConfig(
         level=getattr(logging, level),
         format="%(asctime)s %(levelname)s %(message)s",
@@ -119,6 +122,7 @@ def setup_logging(level: str) -> None:
 
 
 def resolve_collection_path(collection: str, data_root: str) -> Path:
+    """Resolve collection input as either absolute/relative path or data-root name."""
     input_path = Path(collection).expanduser()
     if input_path.exists():
         return input_path.resolve()
@@ -133,6 +137,7 @@ def resolve_collection_path(collection: str, data_root: str) -> Path:
 
 
 def _validate_output_file(output_file: Path, overwrite: bool) -> None:
+    """Fail fast if output exists and overwrite was not requested."""
     if output_file.exists() and not overwrite:
         raise FileExistsError(
             f"Output file already exists: {output_file}. Use --overwrite to replace it."
@@ -140,12 +145,14 @@ def _validate_output_file(output_file: Path, overwrite: bool) -> None:
 
 
 def _validate_timestamp_bucket_ms(value: int | None) -> int | None:
+    """Validate optional timestamp bucket size."""
     if value is not None and value <= 0:
         raise ValueError("--timestamp-bucket-ms must be a positive integer when provided")
     return value
 
 
 def build_config(args: argparse.Namespace) -> Config:
+    """Build the immutable runtime configuration consumed by all modules."""
     collection_path = resolve_collection_path(args.collection, args.data_root)
     project_dir = Path(__file__).resolve().parent.parent
     results_dir = collection_path / "results"
@@ -153,6 +160,7 @@ def build_config(args: argparse.Namespace) -> Config:
     output_dir = Path(args.output_dir).expanduser().resolve()
     output_file = output_dir / f"cleaned_{collection_path.name}.csv"
 
+    # Validate critical output semantics before any expensive processing begins.
     _validate_output_file(output_file, args.overwrite)
     timestamp_bucket_ms = _validate_timestamp_bucket_ms(args.timestamp_bucket_ms)
 

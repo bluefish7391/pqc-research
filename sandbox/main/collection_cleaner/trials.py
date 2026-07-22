@@ -20,6 +20,7 @@ TSHARK_LOG_PATTERN = "tshark_*.log"
 
 
 def find_single_file(trial_dir: Path, pattern: str) -> Path | None:
+    """Return a deterministic file match for a trial artifact pattern."""
     matches = sorted(trial_dir.glob(pattern))
     if not matches:
         return None
@@ -41,6 +42,7 @@ def _validate_trial_artifacts(
     nginx_csv: Path | None,
     pcap: Path | None,
 ) -> None:
+    """Apply strict-mode checks and warnings for missing per-trial inputs."""
     if requests_csv is None:
         msg = f"Missing request CSV for trial '{trial}'"
         if cfg.strict:
@@ -58,6 +60,7 @@ def _validate_trial_artifacts(
 
 
 def _build_base_metrics(requests: list[RequestRow]) -> list[dict[str, float | int | None]]:
+    """Convert normalized request rows into core request metrics."""
     return [
         {
             "timestamp_ns": int(req.timestamp_ns),
@@ -73,6 +76,7 @@ def _merge_resource_gap_fields(
     nginx_rows: list[dict[str, float | None]],
     locust_rows: list[dict[str, float | None]],
 ) -> None:
+    """Unify resource gap into one field by retaining the largest observed gap."""
     for nrow, lrow in zip(nginx_rows, locust_rows):
         # Keep the worse (larger) observed resource gap across both sources.
         gaps = [value for value in (lrow.get("resource_gap_ns"), nrow.get("resource_gap_ns")) if value is not None]
@@ -89,6 +93,7 @@ def discover_manifest(cfg: Config) -> list[TrialArtifacts]:
 
     for trial_dir in trial_dirs:
         trial = trial_dir.name
+        # Artifact discovery is pattern-based because timestamps vary by run.
         requests_csv = find_single_file(trial_dir, REQUESTS_PATTERN)
         locust_csv = find_single_file(trial_dir, LOCUST_PATTERN)
         nginx_csv = find_single_file(trial_dir, NGINX_PATTERN)
@@ -163,6 +168,7 @@ def process_trial(
     if empty_after_warmup:
         return TrialContext(trial=art.trial, rows=[], empty_after_warmup=True)
 
+    # Build the request-derived metrics first; all other metrics align to these rows.
     base_metrics = _build_base_metrics(requests)
 
     locust_samples = load_resource_samples(art.locust_csv, baseline_ns, "locust")
@@ -185,6 +191,7 @@ def process_trial(
     if cfg.pcap_method == "http-events":
         LOGGER.warning("pcap-method 'http-events' not implemented; falling back to 'tcp-window'.")
 
+    # Packet counts are computed per request window from pcap traffic.
     pcap_rows = count_packets_per_request(
         requests,
         art.pcap,
