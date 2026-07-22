@@ -65,6 +65,8 @@ declare -A KEM_GROUPS=(
   # ["pure768"]="MLKEM768"
 )
 
+readarray -t sorted_kem_labels < <(printf '%s\n' "${!KEM_GROUPS[@]}" | sort)
+
 SPAWN_RATE=50
 USER_LEVELS=(1 50 100) # Number of concurrent users to simulate in Locust. This is the -u parameter for locust.
 RTTS=(0 10 25)         # Round-trip time in milliseconds. This is the artificial latency that will be introduced in the network emulation.
@@ -206,7 +208,7 @@ main() {
 
   local total_trials_performed=0
 
-  for kem_label in "${!KEM_GROUPS[@]}"; do
+  for kem_label in "${sorted_kem_labels[@]}"; do
     kem_value="${KEM_GROUPS[${kem_label}]}"
 
     for users in "${USER_LEVELS[@]}"; do
