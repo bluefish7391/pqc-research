@@ -105,7 +105,7 @@ class TLSHandshakeUser(User):
 
             start_time=time.time_ns()
 
-            log.info(f"Request start: start_time={start_time}, request_id={request_id}, completed_handshakes={completed_handshakes}")
+            log.info(f"Request start: request_id={request_id}, start_time={start_time}, completed_handshakes={completed_handshakes}")
             result = subprocess.run(
                 # Array of command-line arguments for the OpenSSL s_client command.
                 [
@@ -120,7 +120,7 @@ class TLSHandshakeUser(User):
                 capture_output=True, # Capture stdout and stderr for analysis.
                 timeout=10, # Set a timeout for the handshake operation to avoid hanging indefinitely. Measured in seconds.
             )
-            log.info(f"Request end: start_time={start_time}, request_id={request_id}, completed_handshakes={completed_handshakes}")
+            log.info(f"Request end: request_id={request_id}, end_time={time.time_ns()}, completed_handshakes={completed_handshakes}")
 
             elapsed_ms = (time.perf_counter_ns() - start_ns) // 1_000_000
             
