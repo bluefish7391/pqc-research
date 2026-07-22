@@ -22,6 +22,8 @@ def load_resource_samples(path: Path | None, baseline_ns: int | None, prefix: st
             ts = parse_int(rec.get("Timestamp"))
             if ts is None:
                 continue
+            if ts < baseline_ns:
+                continue
 
             cpu = parse_percent(rec.get("CPU_Pct"))
             mem_used, _mem_limit = parse_pair_to_bytes(rec.get("Mem_Usage"))
