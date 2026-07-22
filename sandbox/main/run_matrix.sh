@@ -12,7 +12,9 @@
 #    6. Copy/rename the resulting CSV stats with a combo-specific name
 #    7. Teardown again before the next combination
 #
-#  Usage: ./run_matrix.sh
+#  Usage:
+#    ./run_matrix.sh
+#    ./run_matrix.sh --resume <collection_name> <start_trial> <end_trial>
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 set -euo pipefail
@@ -25,6 +27,34 @@ source ./start_containers.sh
 # Environment variable inherited by subprocesses spawned by this script for 
 # this shell session, including docker compose itself.
 export MSYS_NO_PATHCONV=1
+
+RESUME_MODE=0
+RESUME_COLLECTION_NAME=""
+RESUME_TRIAL_START=""
+RESUME_TRIAL_END=""
+
+parse_args() {
+  if [[ "$#" -eq 0 ]]; then
+    return 0
+  fi
+
+  if [[ "$1" != "--resume" ]]; then
+    echo "ERROR: Unknown argument: $1" >&2
+    exit 1
+  fi
+
+  if [[ "$#" -ne 4 ]]; then
+    echo "ERROR: Invalid number of arguments for --resume." >&2
+    exit 1
+  fi
+
+  RESUME_MODE=1
+  RESUME_COLLECTION_NAME="$2"
+  RESUME_TRIAL_START="$3"
+  RESUME_TRIAL_END="$4"
+}
+
+parse_args "$@"
 
 # KEM_GROUPS is an associative array (like a dictionary or a hashmap) mapping
 # a human-readable label to the corresponding OpenSSL group name. The label 
@@ -43,8 +73,6 @@ LOSS_LEVELS=(0 1 2)  # Packet loss percentage. This is the percentage of packets
 TARGET_HANDSHAKES=1000000 # Total number of handshakes to perform in each trial.
 MAX_DURATION="300s" # Headless Locust run max duration per combination (seconds).
 REPETITIONS_PER_TEST=1 # Number of times to repeat each combination for averaging or variance analysis.
-TRIALS_TO_SKIP_AT_START=0 # Number of initial trials to skip (useful for resuming an interrupted sweep).
-TRIALS_TO_SKIP_AT_END=53 # Number of final trials to skip (useful for resuming an interrupted sweep).
 
 # Identifies the name of this file, then the directory containing said file, and sets PROJECT_DIR to that path.
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -53,7 +81,21 @@ NGINX_TMPL="${PROJECT_DIR}/nginx/nginx.conf.tmpl"
 NGINX_CONF="${PROJECT_DIR}/nginx/nginx.conf"
 
 DATA_DIR="${PROJECT_DIR}/data"
-COLLECTION_DIR="${DATA_DIR}/collection_$(date '+%Y%m%d_%H%M%S')"
+if (( RESUME_MODE == 1 )); then
+  if [[ "${RESUME_COLLECTION_NAME}" == *"/"* ]]; then
+    echo "ERROR: Resume collection name must be a directory name under ${DATA_DIR}, not a path: ${RESUME_COLLECTION_NAME}" >&2
+    exit 1
+  fi
+
+  COLLECTION_DIR="${DATA_DIR}/${RESUME_COLLECTION_NAME}"
+  if [[ ! -d "${COLLECTION_DIR}" ]]; then
+    echo "ERROR: Resume collection directory does not exist: ${COLLECTION_DIR}" >&2
+    exit 1
+  fi
+else
+  COLLECTION_DIR="${DATA_DIR}/collection_$(date '+%Y%m%d_%H%M%S')"
+fi
+
 RESULTS_DIR="${COLLECTION_DIR}/results"
 export PCAP_DIR="${COLLECTION_DIR}/pcaps" # Needs to be exported so that the compose file can access it as an environment variable for volume mounting.
 
@@ -66,8 +108,26 @@ LOCUST_OUT_DIR="${PROJECT_DIR}/locust"
 mkdir -p "${COLLECTION_DIR}" "${RESULTS_DIR}" "${PCAP_DIR}" "${LOG_DIR}"
 touch "${MAIN_LOG_FILE}" "${COLLECTION_DIR}/run_info.txt"
 
-# Write run info (levels of each independent variable tested) to a file for later reference.
-cat << EOF >> "${COLLECTION_DIR}/run_info.txt"
+if (( RESUME_MODE == 1 )); then
+  {
+    cat << EOF
+Resume requested at $(date '+%Y-%m-%d %H:%M:%S')
+Resume collection: ${RESUME_COLLECTION_NAME}
+Requested trial window: ${RESUME_TRIAL_START}-${RESUME_TRIAL_END}
+EOF
+    cat << EOF
+KEM groups: ${!KEM_GROUPS[*]}
+User levels: ${USER_LEVELS[*]}
+RTTs (ms): ${RTTS[*]}
+Loss levels (%): ${LOSS_LEVELS[*]}
+Target handshakes per trial: ${TARGET_HANDSHAKES}
+Max duration per run: ${MAX_DURATION}
+Repetitions per test: ${REPETITIONS_PER_TEST}
+EOF
+  } >> "${COLLECTION_DIR}/run_info.txt"
+else
+  {
+    cat << EOF
 Run info for matrix sweep started at $(date '+%Y-%m-%d %H:%M:%S')
 KEM groups: ${!KEM_GROUPS[*]}
 User levels: ${USER_LEVELS[*]}
@@ -76,9 +136,9 @@ Loss levels (%): ${LOSS_LEVELS[*]}
 Target handshakes per trial: ${TARGET_HANDSHAKES}
 Max duration per run: ${MAX_DURATION}
 Repetitions per test: ${REPETITIONS_PER_TEST}
-Trials to skip at start: ${TRIALS_TO_SKIP_AT_START}
-Trials to skip at end: ${TRIALS_TO_SKIP_AT_END}
 EOF
+  } >> "${COLLECTION_DIR}/run_info.txt"
+fi
 
 # == Helpers ==================================================================
 
@@ -86,7 +146,9 @@ log() {
   echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" | tee -a "${MAIN_LOG_FILE}"
 }
 
-init_throttle_stats_csv
+if (( RESUME_MODE == 0 )); then
+  init_throttle_stats_csv
+fi
 
 teardown() {
   log "Tearing down (docker compose down -v)..."
@@ -95,6 +157,10 @@ teardown() {
 
 main() {
   log "Starting KD protocol benchmark matrix sweep."
+  if (( RESUME_MODE == 1 )); then
+    log "Resuming interrupted sweep in ${COLLECTION_DIR}."
+    log "Resume window: trials ${RESUME_TRIAL_START}-${RESUME_TRIAL_END}."
+  fi
   log "KEM groups: ${!KEM_GROUPS[*]}"
   log "User levels: ${USER_LEVELS[*]}"
   log "RTTs (ms): ${RTTS[*]}"
@@ -104,12 +170,41 @@ main() {
 
   cd "${PROJECT_DIR}"
 
+  local total_combinations=$(( ${#KEM_GROUPS[@]} * ${#USER_LEVELS[@]} * ${#RTTS[@]} * ${#LOSS_LEVELS[@]} ))
+  local total_trials=$(( total_combinations * REPETITIONS_PER_TEST ))
+
+  local TRIALS_TO_SKIP_AT_START=0 # Derived from resume start trial when resuming an interrupted sweep.
+  local TRIALS_TO_SKIP_AT_END=0 # Derived from resume end trial when resuming an interrupted sweep.
+
+  if (( RESUME_MODE == 1 )); then
+    if [[ ! "${RESUME_TRIAL_START}" =~ ^[0-9]+$ ]] || [[ ! "${RESUME_TRIAL_END}" =~ ^[0-9]+$ ]]; then
+      log "ERROR: Resume trial bounds must be positive integers."
+      return 1
+    fi
+
+    if (( RESUME_TRIAL_START < 1 )); then
+      log "ERROR: Resume start trial must be at least 1."
+      return 1
+    fi
+
+    if (( RESUME_TRIAL_END < RESUME_TRIAL_START )); then
+      log "ERROR: Resume end trial must be greater than or equal to the start trial."
+      return 1
+    fi
+
+    if (( RESUME_TRIAL_END > total_trials )); then
+      log "ERROR: Resume end trial ${RESUME_TRIAL_END} exceeds total trials ${total_trials}."
+      return 1
+    fi
+
+    TRIALS_TO_SKIP_AT_START=$(( RESUME_TRIAL_START - 1 ))
+    TRIALS_TO_SKIP_AT_END=$(( total_trials - RESUME_TRIAL_END ))
+  fi
+
   # Ensure a clean slate before the sweep starts.
   teardown
 
-  local total_combinations=$(( ${#KEM_GROUPS[@]} * ${#USER_LEVELS[@]} * ${#RTTS[@]} * ${#LOSS_LEVELS[@]} ))
   local total_trials_performed=0
-  total_trials=$(( total_combinations * REPETITIONS_PER_TEST ))
 
   for kem_label in "${!KEM_GROUPS[@]}"; do
     kem_value="${KEM_GROUPS[${kem_label}]}"
