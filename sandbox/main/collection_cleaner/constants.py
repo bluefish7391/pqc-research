@@ -1,5 +1,8 @@
 """Shared constants for collection cleaning."""
 
+DEFAULT_WARMUP_DURATION_SECONDS = 10.0
+POST_WARMUP_HANDSHAKE_LIMIT = 5000
+
 REQUIRED_TRIAL_METRICS = [
     "response_time_ms",
     "response_length",

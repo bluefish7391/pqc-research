@@ -9,6 +9,15 @@ from typing import Any
 from .constants import SUCCESS_FALSE, SUCCESS_TRUE, UNIT_FACTORS
 
 
+SIZE_TOKEN_RE = re.compile(r"^([+-]?(?:\d+(?:\.\d*)?|\.\d+))\s*([A-Za-z]*)$")
+SI_UNIT_ALIASES = {
+    "kb": "KB",
+    "mb": "MB",
+    "gb": "GB",
+    "tb": "TB",
+}
+
+
 def parse_float(value: str | None) -> float | None:
     if value is None:
         return None
@@ -54,22 +63,14 @@ def parse_size_scalar(token: str) -> float | None:
     token = token.strip()
     if not token:
         return None
-    match = re.match(r"^([+-]?(?:\d+(?:\.\d*)?|\.\d+))\s*([A-Za-z]*)$", token)
+
+    match = SIZE_TOKEN_RE.match(token)
     if not match:
         return None
 
     num = float(match.group(1))
-    unit = match.group(2)
-    if unit.lower() == "kb":
-        unit_key = "KB"
-    elif unit.lower() == "mb":
-        unit_key = "MB"
-    elif unit.lower() == "gb":
-        unit_key = "GB"
-    elif unit.lower() == "tb":
-        unit_key = "TB"
-    else:
-        unit_key = unit.upper()
+    unit = match.group(2).strip()
+    unit_key = SI_UNIT_ALIASES.get(unit.lower(), unit.upper())
 
     factor = UNIT_FACTORS.get(unit_key)
     if factor is None:

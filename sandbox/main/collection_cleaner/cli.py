@@ -6,10 +6,14 @@ import argparse
 import logging
 from pathlib import Path
 
+from .constants import DEFAULT_WARMUP_DURATION_SECONDS
 from .models import Config
 
 
-def parse_args() -> argparse.Namespace:
+NS_PER_SECOND = 1_000_000_000
+
+
+def _build_parser() -> argparse.ArgumentParser:
     script_dir = Path(__file__).resolve().parent.parent
     parser = argparse.ArgumentParser(
         description="Clean one collection and emit one deterministic consolidated CSV"
@@ -28,7 +32,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--warmup-dur",
         type=float,
-        default=10.0,
+        default=DEFAULT_WARMUP_DURATION_SECONDS,
         help="Warm-up duration in seconds",
     )
     parser.add_argument(
@@ -100,7 +104,11 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Scale numeric metric columns up by derived powers of 10 before writing the CSV",
     )
-    return parser.parse_args()
+    return parser
+
+
+def parse_args() -> argparse.Namespace:
+    return _build_parser().parse_args()
 
 
 def setup_logging(level: str) -> None:
@@ -124,6 +132,19 @@ def resolve_collection_path(collection: str, data_root: str) -> Path:
     )
 
 
+def _validate_output_file(output_file: Path, overwrite: bool) -> None:
+    if output_file.exists() and not overwrite:
+        raise FileExistsError(
+            f"Output file already exists: {output_file}. Use --overwrite to replace it."
+        )
+
+
+def _validate_timestamp_bucket_ms(value: int | None) -> int | None:
+    if value is not None and value <= 0:
+        raise ValueError("--timestamp-bucket-ms must be a positive integer when provided")
+    return value
+
+
 def build_config(args: argparse.Namespace) -> Config:
     collection_path = resolve_collection_path(args.collection, args.data_root)
     project_dir = Path(__file__).resolve().parent.parent
@@ -132,14 +153,8 @@ def build_config(args: argparse.Namespace) -> Config:
     output_dir = Path(args.output_dir).expanduser().resolve()
     output_file = output_dir / f"cleaned_{collection_path.name}.csv"
 
-    if output_file.exists() and not args.overwrite:
-        raise FileExistsError(
-            f"Output file already exists: {output_file}. Use --overwrite to replace it."
-        )
-
-    timestamp_bucket_ms: int | None = args.timestamp_bucket_ms
-    if timestamp_bucket_ms is not None and timestamp_bucket_ms <= 0:
-        raise ValueError("--timestamp-bucket-ms must be a positive integer when provided")
+    _validate_output_file(output_file, args.overwrite)
+    timestamp_bucket_ms = _validate_timestamp_bucket_ms(args.timestamp_bucket_ms)
 
     return Config(
         collection_path=collection_path,
@@ -147,7 +162,7 @@ def build_config(args: argparse.Namespace) -> Config:
         results_dir=results_dir,
         pcap_dir=pcap_dir,
         output_file=output_file,
-        warmup_ns=int(args.warmup_dur * 1_000_000_000),
+        warmup_ns=int(args.warmup_dur * NS_PER_SECOND),
         resource_join=args.resource_join,
         resource_max_gap_ns=args.resource_max_gap_ns,
         pcap_method=args.pcap_method,

@@ -6,6 +6,7 @@ from __future__ import annotations
 import logging
 
 from .cli import build_config, parse_args, setup_logging
+from .models import Config, TrialArtifacts, TrialContext
 from .output import (
     assert_numeric_only_non_key_fields,
     build_output_rows,
@@ -21,12 +22,7 @@ from .trials import discover_manifest, process_trial
 LOGGER = logging.getLogger("clean_collection")
 
 
-def main() -> int:
-    args = parse_args()
-    setup_logging(args.log_level)
-
-    cfg = build_config(args)
-
+def _log_config(cfg: Config) -> None:
     LOGGER.info("Collection: %s", cfg.collection_path.name)
     LOGGER.info("Collection path: %s", cfg.collection_path)
     LOGGER.info("Results dir: %s", cfg.results_dir)
@@ -43,13 +39,12 @@ def main() -> int:
         cfg.timestamp_bucket_ms,
     )
 
-    manifest = discover_manifest(cfg)
-    if not manifest:
-        raise RuntimeError(f"No trial directories found under {cfg.results_dir}")
 
-    stats = {
+def _build_stats() -> dict[str, int]:
+    return {
         "request_rows_parse_dropped": 0,
         "rows_removed_warmup": 0,
+        "rows_removed_post_warmup_handshake_limit": 0,
         "trials_empty_after_warmup": 0,
         "duplicate_request_timestamps_collapsed": 0,
         "bucket_rows_collapsed": 0,
@@ -60,15 +55,38 @@ def main() -> int:
         "pcap_ambiguous_stream_matches": 0,
     }
 
-    router_session = RouterTsharkSession(cfg.project_dir, cfg.pcap_dir)
-    trial_contexts = []
+
+def _process_trials(
+    manifest: list[TrialArtifacts],
+    cfg: Config,
+    stats: dict[str, int],
+    router_session: RouterTsharkSession,
+) -> list[TrialContext]:
+    trial_contexts: list[TrialContext] = []
+    # Keep container lifecycle centralized so every path tears down cleanly.
     try:
         for art in sorted(manifest, key=lambda x: x.trial):
             LOGGER.info("Processing trial: %s", art.trial)
-            ctx = process_trial(art, cfg, stats, router_session)
-            trial_contexts.append(ctx)
+            trial_contexts.append(process_trial(art, cfg, stats, router_session))
     finally:
         router_session.teardown()
+    return trial_contexts
+
+
+def main() -> int:
+    args = parse_args()
+    setup_logging(args.log_level)
+
+    cfg = build_config(args)
+    _log_config(cfg)
+
+    manifest = discover_manifest(cfg)
+    if not manifest:
+        raise RuntimeError(f"No trial directories found under {cfg.results_dir}")
+
+    stats = _build_stats()
+    router_session = RouterTsharkSession(cfg.project_dir, cfg.pcap_dir)
+    trial_contexts = _process_trials(manifest, cfg, stats, router_session)
 
     trial_contexts = maybe_bucket_trial_contexts(
         trial_contexts,

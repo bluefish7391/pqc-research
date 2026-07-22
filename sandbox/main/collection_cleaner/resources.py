@@ -10,6 +10,9 @@ from .models import RequestRow
 from .parsing import parse_int, parse_pair_to_bytes, parse_percent
 
 
+SAMPLE_TIME_FIELDS = {"sample_time_ns", "rel_time_ns"}
+
+
 def load_resource_samples(path: Path | None, baseline_ns: int | None, prefix: str) -> list[dict[str, float]]:
     if path is None or baseline_ns is None:
         return []
@@ -46,49 +49,6 @@ def load_resource_samples(path: Path | None, baseline_ns: int | None, prefix: st
         dedup[int(row["rel_time_ns"])] = row
 
     return [dedup[k] for k in sorted(dedup.keys())]
-
-
-def choose_resource_index(
-    req_ts: int, sample_times: list[int], strategy: str
-) -> tuple[int | None, int | None, int | None]:
-    if not sample_times:
-        return (None, None, None)
-
-    left_pos = bisect_right(sample_times, req_ts) - 1
-    right_pos = bisect_left(sample_times, req_ts)
-
-    left_idx = left_pos if left_pos >= 0 else None
-    right_idx = right_pos if right_pos < len(sample_times) else None
-
-    if strategy == "backward":
-        return (left_idx, left_idx, None)
-
-    if strategy == "forward":
-        return (right_idx, None, right_idx)
-
-    if strategy == "nearest":
-        if left_idx is None:
-            return (right_idx, None, right_idx)
-        if right_idx is None:
-            return (left_idx, left_idx, None)
-        left_gap = abs(req_ts - sample_times[left_idx])
-        right_gap = abs(sample_times[right_idx] - req_ts)
-        if left_gap <= right_gap:
-            return (left_idx, left_idx, right_idx)
-        return (right_idx, left_idx, right_idx)
-
-    if strategy == "interp":
-        if left_idx is not None and right_idx is not None:
-            if sample_times[left_idx] == req_ts:
-                return (left_idx, left_idx, right_idx)
-            if sample_times[right_idx] == req_ts:
-                return (right_idx, left_idx, right_idx)
-            return (None, left_idx, right_idx)
-        if left_idx is not None:
-            return (left_idx, left_idx, None)
-        return (right_idx, None, right_idx)
-
-    raise ValueError(f"Unsupported resource join strategy: {strategy}")
 
 
 def _find_unassigned_backward(
@@ -171,12 +131,25 @@ def _select_request_index_for_sample(
     raise ValueError(f"Unsupported resource join strategy: {strategy}")
 
 
+def _build_empty_aligned_rows(
+    request_count: int, metric_fields: list[str]
+) -> list[dict[str, float | None]]:
+    aligned: list[dict[str, float | None]] = []
+    for _ in range(request_count):
+        row: dict[str, float | None] = {"resource_gap_ns": None}
+        for field in metric_fields:
+            row[field] = None
+        aligned.append(row)
+    return aligned
+
+
 def align_resource_series(
     requests: list[RequestRow],
     samples: list[dict[str, float]],
     strategy: str,
     max_gap_ns: int | None,
 ) -> list[dict[str, float | None]]:
+    """Align resource samples onto request rows using one-sample-per-request semantics."""
     if not requests:
         return []
 
@@ -185,18 +158,14 @@ def align_resource_series(
 
     request_times = [int(req.timestamp_ns) for req in requests]
     sample_times = [int(row["rel_time_ns"]) for row in samples]
-    metric_fields = [k for k in samples[0].keys() if k not in {"sample_time_ns", "rel_time_ns"}]
+    metric_fields = [k for k in samples[0].keys() if k not in SAMPLE_TIME_FIELDS]
 
-    aligned: list[dict[str, float | None]] = []
-    for _req in requests:
-        row: dict[str, float | None] = {"resource_gap_ns": None}
-        for field in metric_fields:
-            row[field] = None
-        aligned.append(row)
+    aligned = _build_empty_aligned_rows(len(requests), metric_fields)
 
     assigned_request_indexes: set[int] = set()
 
     for sample_idx, sample_ts in enumerate(sample_times):
+        # Sample-once assignment ensures each request row is populated by at most one sample.
         req_idx = _select_request_index_for_sample(
             sample_ts, request_times, assigned_request_indexes, strategy
         )

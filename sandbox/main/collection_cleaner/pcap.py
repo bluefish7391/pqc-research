@@ -17,6 +17,33 @@ from .parsing import parse_boolish_field
 
 LOGGER = logging.getLogger("clean_collection")
 
+TSHARK_FIELD_ARGS = [
+    "-T",
+    "fields",
+    "-e",
+    "frame.time_epoch",
+    "-e",
+    "tcp.stream",
+    "-e",
+    "ip.src",
+    "-e",
+    "tcp.srcport",
+    "-e",
+    "ip.dst",
+    "-e",
+    "tcp.dstport",
+    "-e",
+    "tcp.analysis.retransmission",
+    "-e",
+    "tcp.analysis.fast_retransmission",
+    "-e",
+    "tcp.analysis.spurious_retransmission",
+    "-E",
+    "separator=,",
+    "-E",
+    "header=n",
+]
+
 
 class RouterTsharkSession:
     def __init__(self, project_dir: Path, pcap_dir: Path):
@@ -74,31 +101,8 @@ class RouterTsharkSession:
             "tshark",
             "-r",
             container_pcap,
-            "-T",
-            "fields",
-            "-e",
-            "frame.time_epoch",
-            "-e",
-            "tcp.stream",
-            "-e",
-            "ip.src",
-            "-e",
-            "tcp.srcport",
-            "-e",
-            "ip.dst",
-            "-e",
-            "tcp.dstport",
-            "-e",
-            "tcp.analysis.retransmission",
-            "-e",
-            "tcp.analysis.fast_retransmission",
-            "-e",
-            "tcp.analysis.spurious_retransmission",
-            "-E",
-            "separator=,",
-            "-E",
-            "header=n",
         ]
+        cmd.extend(TSHARK_FIELD_ARGS)
 
         proc = self._run(cmd)
         if proc.returncode != 0:
@@ -211,31 +215,8 @@ def run_tshark_extract(
         tshark_bin,
         "-r",
         str(pcap_path),
-        "-T",
-        "fields",
-        "-e",
-        "frame.time_epoch",
-        "-e",
-        "tcp.stream",
-        "-e",
-        "ip.src",
-        "-e",
-        "tcp.srcport",
-        "-e",
-        "ip.dst",
-        "-e",
-        "tcp.dstport",
-        "-e",
-        "tcp.analysis.retransmission",
-        "-e",
-        "tcp.analysis.fast_retransmission",
-        "-e",
-        "tcp.analysis.spurious_retransmission",
-        "-E",
-        "separator=,",
-        "-E",
-        "header=n",
     ]
+    cmd.extend(TSHARK_FIELD_ARGS)
 
     try:
         proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
@@ -270,6 +251,15 @@ def packet_nan_rows(requests: list[RequestRow], code: int) -> list[dict[str, flo
         }
         for _ in requests
     ]
+
+
+def _empty_packet_metrics_row() -> dict[str, float | None]:
+    return {
+        "packets_client_to_server_per_request": None,
+        "packets_server_to_client_per_request": None,
+        "packets_total_per_request": None,
+        "pcap_match_quality_code": 3.0,
+    }
 
 
 def count_packets_per_request(
@@ -322,14 +312,7 @@ def count_packets_per_request(
         candidates = packets_rel[start_idx:end_idx]
 
         if not candidates:
-            out_rows.append(
-                {
-                    "packets_client_to_server_per_request": None,
-                    "packets_server_to_client_per_request": None,
-                    "packets_total_per_request": None,
-                    "pcap_match_quality_code": 3.0,
-                }
-            )
+            out_rows.append(_empty_packet_metrics_row())
             continue
 
         by_stream: dict[int, dict[str, int]] = {}
@@ -346,14 +329,7 @@ def count_packets_per_request(
                 by_stream[stream]["other"] += 1
 
         if not by_stream:
-            out_rows.append(
-                {
-                    "packets_client_to_server_per_request": None,
-                    "packets_server_to_client_per_request": None,
-                    "packets_total_per_request": None,
-                    "pcap_match_quality_code": 3.0,
-                }
-            )
+            out_rows.append(_empty_packet_metrics_row())
             continue
 
         streams = sorted(by_stream.keys())
