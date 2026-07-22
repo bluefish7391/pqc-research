@@ -89,6 +89,86 @@ def choose_resource_index(
     raise ValueError(f"Unsupported resource join strategy: {strategy}")
 
 
+def _find_unassigned_backward(
+    sample_ts: int,
+    request_times: list[int],
+    assigned: set[int],
+) -> int | None:
+    idx = bisect_left(request_times, sample_ts)
+    while idx < len(request_times) and idx in assigned:
+        idx += 1
+    if idx >= len(request_times):
+        return None
+    return idx
+
+
+def _find_unassigned_forward(
+    sample_ts: int,
+    request_times: list[int],
+    assigned: set[int],
+) -> int | None:
+    idx = bisect_right(request_times, sample_ts) - 1
+    while idx >= 0 and idx in assigned:
+        idx -= 1
+    if idx < 0:
+        return None
+    return idx
+
+
+def _find_unassigned_nearest(
+    sample_ts: int,
+    request_times: list[int],
+    assigned: set[int],
+) -> int | None:
+    if not request_times:
+        return None
+
+    right = bisect_left(request_times, sample_ts)
+    left = right - 1
+
+    while left >= 0 or right < len(request_times):
+        left_dist = None
+        right_dist = None
+
+        if left >= 0:
+            left_dist = abs(sample_ts - request_times[left])
+        if right < len(request_times):
+            right_dist = abs(request_times[right] - sample_ts)
+
+        choose_left = False
+        if left_dist is not None and right_dist is not None:
+            choose_left = left_dist <= right_dist
+        elif left_dist is not None:
+            choose_left = True
+
+        if choose_left:
+            if left not in assigned:
+                return left
+            left -= 1
+        else:
+            if right not in assigned:
+                return right
+            right += 1
+
+    return None
+
+
+def _select_request_index_for_sample(
+    sample_ts: int,
+    request_times: list[int],
+    assigned: set[int],
+    strategy: str,
+) -> int | None:
+    if strategy == "backward":
+        return _find_unassigned_backward(sample_ts, request_times, assigned)
+    if strategy == "forward":
+        return _find_unassigned_forward(sample_ts, request_times, assigned)
+    if strategy in {"nearest", "interp"}:
+        # In sample-once mode, "interp" falls back to nearest request row.
+        return _find_unassigned_nearest(sample_ts, request_times, assigned)
+    raise ValueError(f"Unsupported resource join strategy: {strategy}")
+
+
 def align_resource_series(
     requests: list[RequestRow],
     samples: list[dict[str, float]],
@@ -101,53 +181,33 @@ def align_resource_series(
     if not samples:
         return [{"resource_gap_ns": None} for _ in requests]
 
+    request_times = [int(req.timestamp_ns) for req in requests]
     sample_times = [int(row["rel_time_ns"]) for row in samples]
     metric_fields = [k for k in samples[0].keys() if k not in {"sample_time_ns", "rel_time_ns"}]
 
     aligned: list[dict[str, float | None]] = []
-
-    for req in requests:
-        selected_idx, left_idx, right_idx = choose_resource_index(
-            req.timestamp_ns, sample_times, strategy
-        )
-
-        result: dict[str, float | None] = {"resource_gap_ns": None}
+    for _req in requests:
+        row: dict[str, float | None] = {"resource_gap_ns": None}
         for field in metric_fields:
-            result[field] = None
+            row[field] = None
+        aligned.append(row)
 
-        if selected_idx is not None:
-            sample_ts = sample_times[selected_idx]
-            gap = abs(req.timestamp_ns - sample_ts)
-            if max_gap_ns is None or gap <= max_gap_ns:
-                for field in metric_fields:
-                    result[field] = samples[selected_idx].get(field)
-                result["resource_gap_ns"] = float(gap)
-            aligned.append(result)
+    assigned_request_indexes: set[int] = set()
+
+    for sample_idx, sample_ts in enumerate(sample_times):
+        req_idx = _select_request_index_for_sample(
+            sample_ts, request_times, assigned_request_indexes, strategy
+        )
+        if req_idx is None:
             continue
 
-        if strategy == "interp" and left_idx is not None and right_idx is not None:
-            left_ts = sample_times[left_idx]
-            right_ts = sample_times[right_idx]
-            denom = right_ts - left_ts
-            if denom == 0:
-                aligned.append(result)
-                continue
+        gap = abs(request_times[req_idx] - sample_ts)
+        if max_gap_ns is not None and gap > max_gap_ns:
+            continue
 
-            alpha = (req.timestamp_ns - left_ts) / denom
-            gap = min(abs(req.timestamp_ns - left_ts), abs(right_ts - req.timestamp_ns))
-            if max_gap_ns is not None and gap > max_gap_ns:
-                aligned.append(result)
-                continue
-
-            for field in metric_fields:
-                left_val = samples[left_idx].get(field)
-                right_val = samples[right_idx].get(field)
-                if left_val is None or right_val is None:
-                    result[field] = None
-                else:
-                    result[field] = float(left_val) + alpha * (float(right_val) - float(left_val))
-            result["resource_gap_ns"] = float(gap)
-
-        aligned.append(result)
+        for field in metric_fields:
+            aligned[req_idx][field] = samples[sample_idx].get(field)
+        aligned[req_idx]["resource_gap_ns"] = float(gap)
+        assigned_request_indexes.add(req_idx)
 
     return aligned
