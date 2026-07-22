@@ -110,24 +110,7 @@ LOCUST_OUT_DIR="${PROJECT_DIR}/locust"
 mkdir -p "${COLLECTION_DIR}" "${RESULTS_DIR}" "${PCAP_DIR}" "${LOG_DIR}"
 touch "${MAIN_LOG_FILE}" "${COLLECTION_DIR}/run_info.txt"
 
-if (( RESUME_MODE == 1 )); then
-  {
-    cat << EOF
-Resume requested at $(date '+%Y-%m-%d %H:%M:%S')
-Resume collection: ${RESUME_COLLECTION_NAME}
-Requested trial window: ${RESUME_TRIAL_START}-${RESUME_TRIAL_END}
-EOF
-    cat << EOF
-KEM groups: ${!KEM_GROUPS[*]}
-User levels: ${USER_LEVELS[*]}
-RTTs (ms): ${RTTS[*]}
-Loss levels (%): ${LOSS_LEVELS[*]}
-Target handshakes per trial: ${TARGET_HANDSHAKES}
-Max duration per run: ${MAX_DURATION}
-Repetitions per test: ${REPETITIONS_PER_TEST}
-EOF
-  } >> "${COLLECTION_DIR}/run_info.txt"
-else
+if (( RESUME_MODE == 0 )); then
   {
     cat << EOF
 Run info for matrix sweep started at $(date '+%Y-%m-%d %H:%M:%S')
