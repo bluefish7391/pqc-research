@@ -7,7 +7,7 @@ import logging
 from pathlib import Path
 
 from .constants import POST_WARMUP_HANDSHAKE_LIMIT
-from .models import RequestRow
+from .models import PostWarmupHandshakeWarning, RequestRow
 from .parsing import parse_float, parse_int, parse_success
 
 LOGGER = logging.getLogger("clean_collection")
@@ -44,17 +44,25 @@ def _apply_warmup_filter(
 
 def _apply_post_warmup_limit(
     filtered_raw: list[tuple[dict[str, str], int]],
+    trial: str,
     stats: dict[str, int],
-) -> list[tuple[dict[str, str], int]]:
+) -> tuple[list[tuple[dict[str, str], int]], PostWarmupHandshakeWarning | None]:
     """Keep only the earliest post-warmup handshake window for consistent horizons."""
     if len(filtered_raw) < POST_WARMUP_HANDSHAKE_LIMIT:
-        return filtered_raw
+        return (
+            filtered_raw,
+            PostWarmupHandshakeWarning(
+                trial=trial,
+                observed_post_warmup_handshakes=len(filtered_raw),
+                required_post_warmup_handshakes=POST_WARMUP_HANDSHAKE_LIMIT,
+            ),
+        )
 
     sorted_starts = sorted(start for _, start in filtered_raw)
     handshake_cutoff_ns = sorted_starts[POST_WARMUP_HANDSHAKE_LIMIT - 1]
     limited_raw = [(row, start) for row, start in filtered_raw if start <= handshake_cutoff_ns]
     stats["rows_removed_post_warmup_handshake_limit"] += max(0, len(filtered_raw) - len(limited_raw))
-    return limited_raw
+    return (limited_raw, None)
 
 
 def _normalize_rows(
@@ -97,12 +105,12 @@ def _dedupe_by_timestamp(
 
 def filter_and_normalize_requests(
     rows: list[dict[str, str]], warmup_ns: int, trial: str, stats: dict[str, int]
-) -> tuple[list[RequestRow], int | None, bool]:
+) -> tuple[list[RequestRow], int | None, bool, PostWarmupHandshakeWarning | None]:
     """Prepare request rows for downstream alignment and packet matching."""
     starts = _parse_start_times(rows)
     if not starts:
         LOGGER.warning("Trial '%s' has no parseable start_time_ns values.", trial)
-        return ([], None, True)
+        return ([], None, True, None)
 
     first_request_ns = min(starts)
     warmup_cutoff_ns = first_request_ns + warmup_ns
@@ -115,13 +123,13 @@ def filter_and_normalize_requests(
     if not filtered_raw:
         LOGGER.warning("Trial '%s' empty after warm-up filter.", trial)
         stats["trials_empty_after_warmup"] += 1
-        return ([], None, True)
+        return ([], None, True, None)
 
     # Enforce the post-warmup request horizon used by all downstream metrics.
-    filtered_raw = _apply_post_warmup_limit(filtered_raw, stats)
+    filtered_raw, post_warmup_warning = _apply_post_warmup_limit(filtered_raw, trial, stats)
 
     baseline_ns = min(start for _, start in filtered_raw)
     normalized = _normalize_rows(filtered_raw, baseline_ns)
     deduped = _dedupe_by_timestamp(normalized, stats)
 
-    return (deduped, baseline_ns, False)
+    return (deduped, baseline_ns, False, post_warmup_warning)

@@ -22,6 +22,14 @@ class TrialContext:
     trial: str
     rows: list[dict[str, float | int | None]]
     empty_after_warmup: bool
+    post_warmup_warning: PostWarmupHandshakeWarning | None = None
+
+
+@dataclass(frozen=True)
+class PostWarmupHandshakeWarning:
+    trial: str
+    observed_post_warmup_handshakes: int
+    required_post_warmup_handshakes: int
 
 
 @dataclass

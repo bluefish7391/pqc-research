@@ -161,7 +161,7 @@ def process_trial(
         return TrialContext(trial=art.trial, rows=[], empty_after_warmup=True)
 
     request_rows = load_requests(art.requests_csv)
-    requests, baseline_ns, empty_after_warmup = filter_and_normalize_requests(
+    requests, baseline_ns, empty_after_warmup, post_warmup_warning = filter_and_normalize_requests(
         request_rows, cfg.warmup_ns, art.trial, stats
     )
 
@@ -203,4 +203,9 @@ def process_trial(
     )
 
     merged_rows = merge_metric_rows(base_metrics, locust_aligned, nginx_aligned, pcap_rows)
-    return TrialContext(trial=art.trial, rows=merged_rows, empty_after_warmup=False)
+    return TrialContext(
+        trial=art.trial,
+        rows=merged_rows,
+        empty_after_warmup=False,
+        post_warmup_warning=post_warmup_warning,
+    )

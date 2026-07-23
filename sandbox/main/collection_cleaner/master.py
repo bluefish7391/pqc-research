@@ -16,6 +16,7 @@ from .output import (
     scale_output_rows,
     write_trial_intermediate_csvs,
     write_csv,
+    write_post_warmup_warnings_file,
     write_validation_report,
 )
 from .pcap import RouterTsharkSession
@@ -98,6 +99,11 @@ def main() -> int:
     stats = _build_stats()
     router_session = RouterTsharkSession(cfg.project_dir, cfg.pcap_dir)
     trial_contexts = _process_trials(manifest, cfg, stats, router_session)
+    post_warmup_warnings = [
+        ctx.post_warmup_warning
+        for ctx in trial_contexts
+        if ctx.post_warmup_warning is not None
+    ]
 
     # 4) Persist per-trial pre-bucketing intermediates and reload from disk.
     if cfg.emit_intermediate_trial_csvs:
@@ -136,9 +142,16 @@ def main() -> int:
     # 7) Validate output shape and emit final artifacts.
     assert_numeric_only_non_key_fields(rows, header)
     write_csv(cfg.output_file, header, rows)
+    warnings_path = write_post_warmup_warnings_file(
+        cfg.output_file.parent,
+        cfg.collection_path.name,
+        post_warmup_warnings,
+    )
 
     LOGGER.info("Wrote consolidated CSV: %s", cfg.output_file)
     LOGGER.info("Output rows: %d", len(rows))
+    LOGGER.info("Warnings file written: %s", warnings_path)
+    LOGGER.info("Post-warmup warning count: %d", len(post_warmup_warnings))
 
     if cfg.emit_validation_report:
         report_path = write_validation_report(
