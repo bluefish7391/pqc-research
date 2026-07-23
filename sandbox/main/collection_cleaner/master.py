@@ -104,6 +104,12 @@ def main() -> int:
         for ctx in trial_contexts
         if ctx.post_warmup_warning is not None
     ]
+    below_limit_warning_count = sum(
+        1 for warning in post_warmup_warnings if warning.warning_type == "below-limit"
+    )
+    near_end_warning_count = sum(
+        1 for warning in post_warmup_warnings if warning.warning_type == "near-end-cutoff"
+    )
 
     # 4) Persist per-trial pre-bucketing intermediates and reload from disk.
     if cfg.emit_intermediate_trial_csvs:
@@ -151,7 +157,12 @@ def main() -> int:
     LOGGER.info("Wrote consolidated CSV: %s", cfg.output_file)
     LOGGER.info("Output rows: %d", len(rows))
     LOGGER.info("Warnings file written: %s", warnings_path)
-    LOGGER.info("Post-warmup warning count: %d", len(post_warmup_warnings))
+    LOGGER.info(
+        "Post-warmup warning count: total=%d below_limit=%d near_end_cutoff=%d",
+        len(post_warmup_warnings),
+        below_limit_warning_count,
+        near_end_warning_count,
+    )
 
     if cfg.emit_validation_report:
         report_path = write_validation_report(

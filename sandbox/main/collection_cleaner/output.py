@@ -13,6 +13,7 @@ from .constants import (
     BUCKET_MEAN_METRICS,
     BUCKET_ONLY_TRIAL_METRICS,
     BUCKET_SUM_METRICS,
+    POST_WARMUP_CUTOFF_NEAR_END_WARNING_SECONDS,
     POST_WARMUP_HANDSHAKE_LIMIT,
     REQUIRED_TRIAL_METRICS,
 )
@@ -347,33 +348,54 @@ def write_post_warmup_warnings_file(
     collection_name: str,
     warnings: list[PostWarmupHandshakeWarning],
 ) -> Path:
-    """Write a deterministic warnings artifact for low post-warmup handshake trials."""
+    """Write deterministic warnings for below-limit and near-end cutoff trial conditions."""
     output_dir.mkdir(parents=True, exist_ok=True)
     warnings_path = output_dir / "warnings.txt"
 
-    sorted_warnings = sorted(warnings, key=lambda item: item.trial)
+    sorted_warnings = sorted(warnings, key=lambda item: (item.warning_type, item.trial))
     required_limit = (
         sorted_warnings[0].required_post_warmup_handshakes
         if sorted_warnings
         else POST_WARMUP_HANDSHAKE_LIMIT
     )
 
+    below_limit_warnings = [w for w in sorted_warnings if w.warning_type == "below-limit"]
+    near_end_warnings = [w for w in sorted_warnings if w.warning_type == "near-end-cutoff"]
+
     lines = [
         f"Collection: {collection_name}",
         f"Post-warmup handshake limit: {required_limit}",
+        f"Near-end cutoff warning threshold (seconds): {POST_WARMUP_CUTOFF_NEAR_END_WARNING_SECONDS:.3f}",
         "",
     ]
 
-    if not sorted_warnings:
-        lines.append("No trials were below the post-warmup handshake limit.")
+    if not below_limit_warnings and not near_end_warnings:
+        lines.append("No post-warmup handshake warnings.")
     else:
         lines.append("Trials below the post-warmup handshake limit:")
-        for warning in sorted_warnings:
-            lines.append(
-                "- "
-                f"{warning.trial}: "
-                f"completed_requests={warning.observed_post_warmup_handshakes}"
-            )
+        if not below_limit_warnings:
+            lines.append("- none")
+        else:
+            for warning in below_limit_warnings:
+                lines.append(
+                    "- "
+                    f"{warning.trial}: "
+                    f"completed_requests={warning.observed_post_warmup_handshakes}"
+                )
+
+        lines.append("")
+        lines.append("Trials with cutoff handshake near trial end:")
+        if not near_end_warnings:
+            lines.append("- none")
+        else:
+            for warning in near_end_warnings:
+                if warning.cutoff_to_end_seconds is None:
+                    continue
+                lines.append(
+                    "- "
+                    f"{warning.trial}: "
+                    f"cutoff_to_end_seconds={warning.cutoff_to_end_seconds:.3f}"
+                )
 
     with warnings_path.open("w", encoding="utf-8") as f:
         f.write("\n".join(lines) + "\n")

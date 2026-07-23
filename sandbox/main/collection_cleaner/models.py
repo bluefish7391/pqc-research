@@ -28,8 +28,10 @@ class TrialContext:
 @dataclass(frozen=True)
 class PostWarmupHandshakeWarning:
     trial: str
+    warning_type: str
     observed_post_warmup_handshakes: int
     required_post_warmup_handshakes: int
+    cutoff_to_end_seconds: float | None = None
 
 
 @dataclass

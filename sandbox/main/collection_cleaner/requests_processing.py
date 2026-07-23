@@ -6,7 +6,7 @@ import csv
 import logging
 from pathlib import Path
 
-from .constants import POST_WARMUP_HANDSHAKE_LIMIT
+from .constants import POST_WARMUP_CUTOFF_NEAR_END_WARNING_SECONDS, POST_WARMUP_HANDSHAKE_LIMIT
 from .models import PostWarmupHandshakeWarning, RequestRow
 from .parsing import parse_float, parse_int, parse_success
 
@@ -53,6 +53,7 @@ def _apply_post_warmup_limit(
             filtered_raw,
             PostWarmupHandshakeWarning(
                 trial=trial,
+                warning_type="below-limit",
                 observed_post_warmup_handshakes=len(filtered_raw),
                 required_post_warmup_handshakes=POST_WARMUP_HANDSHAKE_LIMIT,
             ),
@@ -60,9 +61,22 @@ def _apply_post_warmup_limit(
 
     sorted_starts = sorted(start for _, start in filtered_raw)
     handshake_cutoff_ns = sorted_starts[POST_WARMUP_HANDSHAKE_LIMIT - 1]
+    last_request_ns = sorted_starts[-1]
+    cutoff_to_end_seconds = (last_request_ns - handshake_cutoff_ns) / 1_000_000_000.0
+
+    post_warmup_warning = None
+    if cutoff_to_end_seconds <= POST_WARMUP_CUTOFF_NEAR_END_WARNING_SECONDS:
+        post_warmup_warning = PostWarmupHandshakeWarning(
+            trial=trial,
+            warning_type="near-end-cutoff",
+            observed_post_warmup_handshakes=len(filtered_raw),
+            required_post_warmup_handshakes=POST_WARMUP_HANDSHAKE_LIMIT,
+            cutoff_to_end_seconds=cutoff_to_end_seconds,
+        )
+
     limited_raw = [(row, start) for row, start in filtered_raw if start <= handshake_cutoff_ns]
     stats["rows_removed_post_warmup_handshake_limit"] += max(0, len(filtered_raw) - len(limited_raw))
-    return (limited_raw, None)
+    return (limited_raw, post_warmup_warning)
 
 
 def _normalize_rows(
