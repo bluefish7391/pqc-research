@@ -17,7 +17,7 @@ services:
 
   # ── OQS-Nginx: TLS 1.3 server, KEM group set via rendered nginx.conf ──
   oqs-nginx:
-    image: openquantumsafe/nginx:latest
+    image: openquantumsafe/nginx@sha256:52f540b0ec4c4dfc0d67f52f75723bb5496b13e2e5608e6f4354cc23454d9813
     container_name: oqs-nginx
     hostname:       oqs-nginx        # Must match CN in server.crt
     networks:
@@ -81,7 +81,7 @@ services:
   #  then triggers headless runs via `docker compose exec`, one per
   #  KEM-group/user-count combination in the sweep.
   oqs-locust:
-    image: openquantumsafe/locust:latest
+    image: openquantumsafe/locust@sha256:e1c17d47cf8c0bfe1d58e4ae5e38643c88ee3c3aa86521a1882c5b4ee8315a76
     container_name: oqs-locust
     networks:
       lt-router-net:
