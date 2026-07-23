@@ -28,7 +28,12 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--output-dir",
         default=str(script_dir / "cleaned-data"),
-        help="Destination directory for cleaned output",
+        help="Destination root directory for cleaned output artifacts",
+    )
+    parser.add_argument(
+        "--intermediate-dir",
+        default=None,
+        help="Override directory for per-trial intermediate CSV artifacts",
     )
     parser.add_argument(
         "--warmup-dur",
@@ -75,7 +80,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--overwrite",
         action="store_true",
-        help="Allow replacing existing cleaned CSV",
+        help="Allow replacing existing cleaned artifacts",
     )
     parser.add_argument(
         "--log-level",
@@ -87,6 +92,13 @@ def _build_parser() -> argparse.ArgumentParser:
         "--emit-validation-report",
         action="store_true",
         help="Write sidecar validation summary JSON",
+    )
+    parser.add_argument(
+        "--no-intermediate-trial-csvs",
+        dest="emit_intermediate_trial_csvs",
+        action="store_false",
+        default=True,
+        help="Disable writing per-trial intermediate CSV files",
     )
     parser.add_argument(
         "--fallback-window-ns",
@@ -157,8 +169,14 @@ def build_config(args: argparse.Namespace) -> Config:
     project_dir = Path(__file__).resolve().parent.parent
     results_dir = collection_path / "results"
     pcap_dir = collection_path / "pcaps"
-    output_dir = Path(args.output_dir).expanduser().resolve()
+    output_root_dir = Path(args.output_dir).expanduser().resolve()
+    output_dir = output_root_dir / collection_path.name
     output_file = output_dir / f"cleaned_{collection_path.name}.csv"
+    intermediate_dir = (
+        Path(args.intermediate_dir).expanduser().resolve()
+        if args.intermediate_dir
+        else output_dir / "intermediates"
+    )
 
     # Validate critical output semantics before any expensive processing begins.
     _validate_output_file(output_file, args.overwrite)
@@ -170,6 +188,7 @@ def build_config(args: argparse.Namespace) -> Config:
         results_dir=results_dir,
         pcap_dir=pcap_dir,
         output_file=output_file,
+        intermediate_dir=intermediate_dir,
         warmup_ns=int(args.warmup_dur * NS_PER_SECOND),
         resource_join=args.resource_join,
         resource_max_gap_ns=args.resource_max_gap_ns,
@@ -179,6 +198,7 @@ def build_config(args: argparse.Namespace) -> Config:
         overwrite=args.overwrite,
         fallback_window_ns=args.fallback_window_ns,
         emit_validation_report=args.emit_validation_report,
+        emit_intermediate_trial_csvs=args.emit_intermediate_trial_csvs,
         timestamp_bucket_ms=timestamp_bucket_ms,
         scale_to_billions=args.scale_to_billions,
     )

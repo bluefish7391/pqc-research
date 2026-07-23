@@ -16,10 +16,80 @@ from .constants import (
     REQUIRED_TRIAL_METRICS,
 )
 from .models import Config, TrialContext
-from .parsing import is_numeric_value, numeric_to_csv
+from .parsing import is_numeric_value, numeric_to_csv, parse_float, parse_int
 
 
 SCALE_TARGET_MAGNITUDE = 10_000_000_000
+INTERMEDIATE_TRIAL_HEADER = ["timestamp_ns", *REQUIRED_TRIAL_METRICS]
+
+
+def trial_intermediate_csv_path(intermediate_dir: Path, trial: str) -> Path:
+    """Return deterministic path for one trial intermediate CSV."""
+    return intermediate_dir / f"{trial}.trimmed.csv"
+
+
+def write_trial_intermediate_csvs(
+    trial_contexts: list[TrialContext],
+    intermediate_dir: Path,
+    overwrite: bool,
+) -> list[Path]:
+    """Persist one pre-bucketing trimmed CSV per trial."""
+    intermediate_dir.mkdir(parents=True, exist_ok=True)
+    written_paths: list[Path] = []
+
+    for ctx in sorted(trial_contexts, key=lambda item: item.trial):
+        path = trial_intermediate_csv_path(intermediate_dir, ctx.trial)
+        if path.exists() and not overwrite:
+            raise FileExistsError(
+                f"Intermediate file already exists: {path}. Use --overwrite to replace it."
+            )
+
+        sorted_rows = sorted(ctx.rows, key=lambda row: int(row["timestamp_ns"]))
+        write_csv(path, INTERMEDIATE_TRIAL_HEADER, sorted_rows)
+        written_paths.append(path)
+
+    return written_paths
+
+
+def _parse_intermediate_row(row: dict[str, str], trial: str) -> dict[str, float | int | None]:
+    """Parse one intermediate row with required schema validation."""
+    timestamp_ns = parse_int(row.get("timestamp_ns"))
+    if timestamp_ns is None:
+        raise ValueError(f"Invalid timestamp_ns in intermediate CSV for trial '{trial}': {row!r}")
+
+    parsed: dict[str, float | int | None] = {"timestamp_ns": int(timestamp_ns)}
+    for metric in REQUIRED_TRIAL_METRICS:
+        parsed[metric] = parse_float(row.get(metric))
+    return parsed
+
+
+def load_trial_intermediate_csvs(intermediate_dir: Path) -> list[TrialContext]:
+    """Load all saved per-trial intermediate CSVs for master assembly."""
+    trial_paths = sorted(intermediate_dir.glob("*.trimmed.csv"))
+    if not trial_paths:
+        raise FileNotFoundError(f"No intermediate trial CSVs found in {intermediate_dir}")
+
+    loaded_contexts: list[TrialContext] = []
+    for path in trial_paths:
+        trial = path.name[: -len(".trimmed.csv")]
+        with path.open("r", newline="") as f:
+            reader = csv.DictReader(f)
+            header = reader.fieldnames or []
+            if header != INTERMEDIATE_TRIAL_HEADER:
+                raise ValueError(
+                    f"Unexpected intermediate CSV header for trial '{trial}' at {path}: {header}"
+                )
+            rows = [_parse_intermediate_row(row, trial) for row in reader]
+
+        loaded_contexts.append(
+            TrialContext(
+                trial=trial,
+                rows=rows,
+                empty_after_warmup=len(rows) == 0,
+            )
+        )
+
+    return loaded_contexts
 
 
 def _mean_non_missing(values: list[float | int | None]) -> float | None:

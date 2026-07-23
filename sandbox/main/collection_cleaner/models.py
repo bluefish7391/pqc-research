@@ -41,6 +41,7 @@ class Config:
     results_dir: Path
     pcap_dir: Path
     output_file: Path
+    intermediate_dir: Path
     warmup_ns: int
     resource_join: str
     resource_max_gap_ns: int | None
@@ -50,5 +51,6 @@ class Config:
     overwrite: bool
     fallback_window_ns: int
     emit_validation_report: bool
+    emit_intermediate_trial_csvs: bool
     timestamp_bucket_ms: int | None
     scale_to_billions: bool

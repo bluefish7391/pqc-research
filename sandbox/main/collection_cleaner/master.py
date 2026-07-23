@@ -11,8 +11,10 @@ from .output import (
     assert_numeric_only_non_key_fields,
     build_output_rows,
     derive_metric_scale_exponents,
+    load_trial_intermediate_csvs,
     maybe_bucket_trial_contexts,
     scale_output_rows,
+    write_trial_intermediate_csvs,
     write_csv,
     write_validation_report,
 )
@@ -29,14 +31,16 @@ def _log_config(cfg: Config) -> None:
     LOGGER.info("Results dir: %s", cfg.results_dir)
     LOGGER.info("Pcap dir: %s", cfg.pcap_dir)
     LOGGER.info("Output file: %s", cfg.output_file)
+    LOGGER.info("Intermediate dir: %s", cfg.intermediate_dir)
     LOGGER.info(
-        "Options: warmup_ns=%d resource_join=%s resource_max_gap_ns=%s pcap_method=%s exclude_retransmissions=%s strict=%s timestamp_bucket_ms=%s",
+        "Options: warmup_ns=%d resource_join=%s resource_max_gap_ns=%s pcap_method=%s exclude_retransmissions=%s strict=%s emit_intermediate_trial_csvs=%s timestamp_bucket_ms=%s",
         cfg.warmup_ns,
         cfg.resource_join,
         cfg.resource_max_gap_ns,
         cfg.pcap_method,
         cfg.exclude_retransmissions,
         cfg.strict,
+        cfg.emit_intermediate_trial_csvs,
         cfg.timestamp_bucket_ms,
     )
 
@@ -95,21 +99,41 @@ def main() -> int:
     router_session = RouterTsharkSession(cfg.project_dir, cfg.pcap_dir)
     trial_contexts = _process_trials(manifest, cfg, stats, router_session)
 
-    # 4) Optionally bucket timestamps before cross-trial merge.
+    # 4) Persist per-trial pre-bucketing intermediates and reload from disk.
+    if cfg.emit_intermediate_trial_csvs:
+        written_paths = write_trial_intermediate_csvs(
+            trial_contexts,
+            cfg.intermediate_dir,
+            cfg.overwrite,
+        )
+        LOGGER.info(
+            "Wrote %d per-trial intermediate CSV files to %s",
+            len(written_paths),
+            cfg.intermediate_dir,
+        )
+
+    trial_contexts = load_trial_intermediate_csvs(cfg.intermediate_dir)
+    LOGGER.info(
+        "Loaded %d per-trial intermediate CSV files from %s",
+        len(trial_contexts),
+        cfg.intermediate_dir,
+    )
+
+    # 5) Optionally bucket timestamps before cross-trial merge.
     trial_contexts = maybe_bucket_trial_contexts(
         trial_contexts,
         cfg.timestamp_bucket_ms,
         stats,
     )
 
-    # 5) Outer-join all trials and optionally rescale numeric magnitudes.
+    # 6) Outer-join all trials and optionally rescale numeric magnitudes.
     header, rows = build_output_rows(trial_contexts, cfg.timestamp_bucket_ms)
     scale_exponents: dict[str, int] = {}
     if cfg.scale_to_billions:
         scale_exponents = derive_metric_scale_exponents(rows, header)
         rows = scale_output_rows(rows, header, scale_exponents)
 
-    # 6) Validate output shape and emit final artifacts.
+    # 7) Validate output shape and emit final artifacts.
     assert_numeric_only_non_key_fields(rows, header)
     write_csv(cfg.output_file, header, rows)
 
