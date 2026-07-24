@@ -107,7 +107,7 @@ services:
         condition: service_healthy
       router:
         condition: service_healthy
-    cpuset: "1"
+    cpuset: "1,2"
     deploy:
       resources:
         limits:
