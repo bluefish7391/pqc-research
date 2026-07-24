@@ -16,6 +16,8 @@ DEFAULT_METRICS = [
     "response_time_ms",
     "locust_cpu_pct",
     "nginx_cpu_pct",
+    "locust_mem_used_bytes",
+    "nginx_mem_used_bytes",
 ]
 
 
@@ -85,7 +87,11 @@ def plot_trial_overlay(trial_df: pd.DataFrame, run_id: str, metric_cols: dict,
             name=metric,
             mode="markers",
             marker=dict(size=5),
-            hovertemplate=f"{metric}<br>raw: %{{customdata:.4f}}<extra></extra>",
+            hovertemplate=(
+                f"{metric}<br>"
+                "time: %{x:,} ns<br>"
+                "raw: %{customdata:.4f}<extra></extra>"
+            ),
             customdata=sub[col],
         ))
 
@@ -117,4 +123,4 @@ def main(csv_path: str, run_id_filter: str = None, metrics_to_plot=None):
 
 if __name__ == "__main__":
     # Example usage, adjust path and run_id as needed.
-    main("cleaned-data/collection_20260723_171818/cleaned_collection_20260723_171818.csv", run_id_filter="classical_u100_rtt0ms_loss0pct_rep1")
+    main("cleaned-data/collection_20260723_221029/cleaned_collection_20260723_221029.csv", run_id_filter="classical_u100_rtt50ms_loss0pct_rep1")
