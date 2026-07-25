@@ -5,7 +5,8 @@ import time
 import logging
 import signal
 import io
-import gevent.util
+import gevent
+from gevent import util as gevent_util
 from locust import User, task, constant, events
 import csv
 
@@ -62,7 +63,7 @@ HTTP_REQUEST = (
 def dump_greenlets(signum, frame):
     log.info("=== GREENLET DUMP ===")
     output = io.StringIO()
-    gevent.util.print_run_info(file=output)
+    gevent_util.print_run_info(file=output)
     for line in output.getvalue().splitlines():
         log.info(line)
 
