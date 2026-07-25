@@ -2,7 +2,7 @@
 certs/
 
 # Results and analysis
-data/collection_*/
+data/*
 figures/
 pcaps/
 cleaned-data/*
