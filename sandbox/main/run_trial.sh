@@ -220,7 +220,7 @@ run_one_combination() {
         --run-time "${MAX_DURATION}" \
         --stop-timeout 5 \
         --csv "/mnt/locust/results_${run_id}" \
-        --csv-full-history \
+        --processes 2 \
       || log "WARNING: locust exited non-zero for ${run_id} (check stats before discarding the run)"
 
     if ! capture_throttle_stats_batch "after" throttle_snapshots_after; then
