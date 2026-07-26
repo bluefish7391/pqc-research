@@ -1,3 +1,56 @@
+# Must match the --processes value passed to the locust invocation below —
+# kept as one variable so the two can't silently drift apart.
+LOCUST_PROCESSES=2
+
+pin_locust_workers_to_cores() {
+  # Discovers the currently-running locust worker PIDs inside oqs-locust and
+  # pins each one to a distinct core via taskset, rather than assuming fixed
+  # PID numbers (which are not stable across runs/containers).
+  #
+  # The master process is spawned first and will have the lowest PID; the
+  # worker processes fork from it afterward and will have higher PIDs, in
+  # spawn order. Sorting numerically and dropping the first entry reliably
+  # isolates the workers without needing to distinguish them by command
+  # line (which looks identical across master/workers).
+  local cores=("$@")   # e.g. pin_locust_workers_to_cores 1 2
+  local total_expected=$(( LOCUST_PROCESSES + 1 ))  # +1 for the master
+  local max_wait=15
+  local waited=0
+  local pids=()
+
+  log "Waiting for ${total_expected} locust process(es) (1 master + ${LOCUST_PROCESSES} workers) to appear..."
+
+  while true; do
+    readarray -t pids < <(docker exec oqs-locust ps -eo pid,comm 2>/dev/null \
+      | awk '$2 ~ /locust/ {print $1}' | sort -n)
+
+    if (( ${#pids[@]} >= total_expected )); then
+      break
+    fi
+
+    if (( waited >= max_wait )); then
+      log "WARNING: Only found ${#pids[@]} locust process(es) after ${max_wait}s (expected ${total_expected}); skipping CPU pinning for this run."
+      return 1
+    fi
+
+    sleep 0.5
+    waited=$(( waited + 1 ))
+  done
+
+  local worker_pids=("${pids[@]:1}")  # drop the lowest PID (the master)
+  local i pid core
+
+  for i in "${!worker_pids[@]}"; do
+    pid="${worker_pids[${i}]}"
+    core="${cores[$(( i % ${#cores[@]} ))]}"  # round-robin if workers > cores given
+
+    if docker exec oqs-locust taskset -cp "${core}" "${pid}" >/dev/null 2>&1; then
+      log "Pinned locust worker pid=${pid} to core ${core}."
+    else
+      log "WARNING: Failed to pin locust worker pid=${pid} to core ${core} (taskset missing, or process already exited)."
+    fi
+  done
+}
 
 THROTTLE_ALIASES=(lt rt ws)
 THROTTLE_METRICS=(nr_periods nr_throttled throttled_usec)
@@ -156,6 +209,9 @@ run_one_combination() {
       sleep 0.2
     done
 
+    # Pin each locust worker to its own distinct core, discovered dynamically
+    pin_locust_workers_to_cores 1 2
+
     log "Locust detected! Starting container-level resource monitor..."
 
     # Keep sampling on a fixed 1s schedule to avoid drift from command runtime.
@@ -220,7 +276,7 @@ run_one_combination() {
         --run-time "${MAX_DURATION}" \
         --stop-timeout 5 \
         --csv "/mnt/locust/results_${run_id}" \
-        --processes 2 \
+        --processes "${LOCUST_PROCESSES}" \
       || log "WARNING: locust exited non-zero for ${run_id} (check stats before discarding the run)"
 
     if ! capture_throttle_stats_batch "after" throttle_snapshots_after; then
