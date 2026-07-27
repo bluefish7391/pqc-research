@@ -9,6 +9,7 @@
 set -euo pipefail
 
 source ./vars.sh
+source ./helpers.sh
 source ./resume_sweep.sh
 source ./run_trial.sh
 source ./start_containers.sh
@@ -62,11 +63,6 @@ fi
 if (( RESUME_MODE == 0 )); then
   init_throttle_stats_csv
 fi
-
-teardown() {
-  log "Tearing down (docker compose down -v)..."
-  docker compose down -v --remove-orphans || log "Warning: docker compose down failed. Continuing..."
-}
 
 main() {
   log "Starting KD protocol benchmark matrix sweep."
