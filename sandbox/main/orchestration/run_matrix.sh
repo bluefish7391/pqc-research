@@ -11,6 +11,7 @@ set -euo pipefail
 source ./vars.sh
 source ./helpers.sh
 source ./resume_sweep.sh
+source ./init_paths.sh
 source ./init_logs.sh
 source ./run_trial.sh
 source ./start_containers.sh
@@ -24,27 +25,7 @@ export MSYS_NO_PATHCONV=1
 resume_init_state # Declares and initializes variables related to resuming a sweep.
 resume_parse_args "$@" # Parses command-line arguments to determine if the script should resume a previous sweep or start a new one. Sets associated variables accordingly.
 
-# Identifies the name of this file, then the directory containing said file, and sets PROJECT_DIR to the parent of said directory.
-PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-
-NGINX_TMPL="${PROJECT_DIR}/nginx/nginx.conf.tmpl"
-NGINX_CONF="${PROJECT_DIR}/nginx/nginx.conf"
-
-DATA_DIR="${PROJECT_DIR}/data"
-resume_resolve_collection_dir "${DATA_DIR}"
-COLLECTION_DIR="${RESUME_COLLECTION_DIR}"
-
-RESULTS_DIR="${COLLECTION_DIR}/results"
-export PCAP_DIR="${COLLECTION_DIR}/pcaps" # Needs to be exported so that the compose file can access it as an environment variable for volume mounting.
-
-LOG_DIR="${COLLECTION_DIR}/logs"
-MAIN_LOG_FILE="${LOG_DIR}/run_matrix.log"
-LOCUST_OUT_DIR="${PROJECT_DIR}/locust"
-
-# Create directories for results, pcaps, and logs if they don't exist yet,
-# as these are untracked by git and may not be present in a fresh clone.
-mkdir -p "${COLLECTION_DIR}" "${RESULTS_DIR}" "${PCAP_DIR}" "${LOG_DIR}"
-touch "${MAIN_LOG_FILE}" "${COLLECTION_DIR}/run_info.txt"
+init_paths
 
 main() {
   if (( RESUME_MODE == 1 )); then
