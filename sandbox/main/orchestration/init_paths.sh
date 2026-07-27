@@ -2,11 +2,10 @@
 
 resolve_collection_dir() {
   if (( RESUME_MODE == 1 )); then
-    validate_resume_collection_dir "$1"
-    echo "${RESUME_COLLECTION_DIR}"
+    validate_resume_collection_dir
+    echo "${RESUME_COLLECTION_NAME}"
   else
-    local default_collection_name="collection_$(date +%Y%m%d_%H%M%S)"
-    echo "${DATA_DIR}/${default_collection_name}"
+    echo "collection_$(date +%Y%m%d_%H%M%S)"
   fi
 }
 
@@ -18,7 +17,7 @@ init_paths() {
   NGINX_CONF="${PROJECT_DIR}/nginx/nginx.conf"
 
   DATA_DIR="${PROJECT_DIR}/data"
-  COLLECTION_DIR="${DATA_DIR}/$(resolve_collection_dir "${DATA_DIR}")"
+  COLLECTION_DIR="${DATA_DIR}/$(resolve_collection_dir)"
 
   RESULTS_DIR="${COLLECTION_DIR}/results"
   export PCAP_DIR="${COLLECTION_DIR}/pcaps"
