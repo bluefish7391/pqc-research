@@ -18,6 +18,7 @@ DEFAULT_METRICS = [
     "nginx_cpu_pct",
     "locust_mem_used_bytes",
     "nginx_mem_used_bytes",
+    "requests_in_bucket"
 ]
 
 
@@ -74,7 +75,7 @@ def plot_trial_overlay(trial_df: pd.DataFrame, run_id: str, metric_cols: dict,
             continue
 
         col = metric_cols[metric]
-        # Drop NaNs for THIS metric specifically, not the whole trial —
+        # Drop NaNs for THIS metric specifically, not the whole trial 
         # each metric has its own sparse subset of populated rows.
         sub = trial_df[[timestamp_col, col]].dropna(subset=[col])
         if sub.empty:
@@ -123,4 +124,4 @@ def main(csv_path: str, run_id_filter: str = None, metrics_to_plot=None):
 
 if __name__ == "__main__":
     # Example usage, adjust path and run_id as needed.
-    main("cleaned-data/collection_20260723_221029/cleaned_collection_20260723_221029.csv", run_id_filter="classical_u100_rtt50ms_loss0pct_rep1")
+    main("cleaned-data/no_process/cleaned_no_process.csv", run_id_filter="classical_u100_rtt0ms_loss0pct_rep1")
