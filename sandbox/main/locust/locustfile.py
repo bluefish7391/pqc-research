@@ -19,16 +19,19 @@ RUN_ID = os.getenv("RUN_ID", "").strip()
 WAIT_TIME   = 0.0
 OPENSSL_BIN = "/opt/oqssa/bin/openssl"
 
+WORKER_ID = uuid.uuid1();
+
 # Open once per Locust worker process, at import time
-csv_path = f"/mnt/locust/results_{RUN_ID}_requests.csv"
+csv_path = f"/mnt/locust/results_{RUN_ID}_p{WORKER_ID}_requests.csv"
 _csv_file = open(csv_path, "w", newline="")
 _csv_writer = csv.writer(_csv_file)
-_csv_writer.writerow(["request_id", "start_time_ns", "response_time_ms", "response_length", "success", "exception"])
+_csv_writer.writerow(["request_id", "greenlet_id", "start_time_ns", "response_time_ms", "response_length", "success", "exception"])
 
 @events.request.add_listener
 def log_request_to_csv(request_type, name, response_time, response_length, exception, context, **kwargs):
     _csv_writer.writerow([
         context.get("request_id"),
+        context.get("greenlet_id"),
         context.get("start_time_ns"),
         response_time,
         response_length,
@@ -41,7 +44,7 @@ def log_request_to_csv(request_type, name, response_time, response_length, excep
 log = logging.getLogger("oqs-tls")
 log.setLevel(logging.INFO)
 
-log_file_name = f"{RUN_ID}_locust_debug.log" if RUN_ID else "locust_debug.log"
+log_file_name = f"{RUN_ID}_p{WORKER_ID}_locust_debug.log" if RUN_ID else f"locust_debug_p{WORKER_ID}.log"
 file_handler = logging.FileHandler(f"/mnt/locust/{log_file_name}", mode="a")
 file_handler.setFormatter(logging.Formatter("%(message)s"))
 log.addHandler(file_handler)
@@ -139,7 +142,7 @@ class TLSHandshakeUser(User):
                     response_time   = elapsed_ms,
                     response_length = len(stdout),
                     exception       = None,
-                    context         = {"request_id": request_id, "start_time_ns": start_time},
+                    context         = {"request_id": request_id, "greenlet_id": self.greenlet_id, "start_time_ns": start_time},
                 )
             else:
                 stderr = result.stderr.decode("ascii", errors="replace").strip()
@@ -155,7 +158,7 @@ class TLSHandshakeUser(User):
                 response_time   = elapsed_ms,
                 response_length = 0,
                 exception       = Exception("Timeout"),
-                context         = {"request_id": request_id, "start_time_ns": start_time},
+                context         = {"request_id": request_id, "greenlet_id": self.greenlet_id, "start_time_ns": start_time},
             )
 
         # Handle any other exceptions that may occur during the handshake process, such as network errors or unexpected output.
@@ -167,7 +170,7 @@ class TLSHandshakeUser(User):
                 response_time   = elapsed_ms,
                 response_length = 0,
                 exception       = e,
-                context         = {"request_id": request_id, "start_time_ns": start_time},
+                context         = {"request_id": request_id, "greenlet_id": self.greenlet_id, "start_time_ns": start_time},
             )
 
         # Check if the target number of handshakes has been reached and stop the Locust runner if so.
