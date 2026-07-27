@@ -31,23 +31,16 @@ resume_parse_args() {
   RESUME_TRIAL_END="$4"
 }
 
-resume_resolve_collection_dir() {
-  local data_dir="$1"
-  local default_collection_name="$2"
+validate_resume_collection_dir() {
+  if [[ "${RESUME_COLLECTION_NAME}" == *"/"* ]]; then
+    echo "ERROR: Resume collection name must be a directory name under ${DATA_DIR}, not a path: ${RESUME_COLLECTION_NAME}" >&2
+    return 1
+  fi
 
-  if (( RESUME_MODE == 1 )); then
-    if [[ "${RESUME_COLLECTION_NAME}" == *"/"* ]]; then
-      echo "ERROR: Resume collection name must be a directory name under ${data_dir}, not a path: ${RESUME_COLLECTION_NAME}" >&2
-      return 1
-    fi
-
-    RESUME_COLLECTION_DIR="${data_dir}/${RESUME_COLLECTION_NAME}"
-    if [[ ! -d "${RESUME_COLLECTION_DIR}" ]]; then
-      echo "ERROR: Resume collection directory does not exist: ${RESUME_COLLECTION_DIR}" >&2
-      return 1
-    fi
-  else
-    RESUME_COLLECTION_DIR="${data_dir}/${default_collection_name}"
+  RESUME_COLLECTION_DIR="${DATA_DIR}/${RESUME_COLLECTION_NAME}"
+  if [[ ! -d "${RESUME_COLLECTION_DIR}" ]]; then
+    echo "ERROR: Resume collection directory does not exist: ${RESUME_COLLECTION_DIR}" >&2
+    return 1
   fi
 }
 

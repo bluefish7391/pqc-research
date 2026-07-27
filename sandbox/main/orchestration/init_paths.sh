@@ -1,5 +1,15 @@
 #!/usr/bin/env bash
 
+resolve_collection_dir() {
+  if (( RESUME_MODE == 1 )); then
+    validate_resume_collection_dir "$1"
+    echo "${RESUME_COLLECTION_DIR}"
+  else
+    local default_collection_name="collection_$(date +%Y%m%d_%H%M%S)"
+    echo "${DATA_DIR}/${default_collection_name}"
+  fi
+}
+
 init_paths() {
   # Resolve project paths and collection targets before the sweep starts.
   PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -8,8 +18,7 @@ init_paths() {
   NGINX_CONF="${PROJECT_DIR}/nginx/nginx.conf"
 
   DATA_DIR="${PROJECT_DIR}/data"
-  resume_resolve_collection_dir "${DATA_DIR}" "pre-pilot"
-  COLLECTION_DIR="${RESUME_COLLECTION_DIR}"
+  COLLECTION_DIR="${DATA_DIR}/$(resolve_collection_dir "${DATA_DIR}")"
 
   RESULTS_DIR="${COLLECTION_DIR}/results"
   export PCAP_DIR="${COLLECTION_DIR}/pcaps"
