@@ -9,6 +9,15 @@ render_nginx_conf() {
   log "Rendered nginx.conf with ssl_ecdh_curve=${kem_value}"
 }
 
+set_up_routing() {
+  # Force symmetric routing through the router container so that both directions
+  # of each TCP flow pass through the router's eth0/eth1 interfaces. Without this,
+  # each container routes return traffic via the Docker bridge default gateway,
+  # bypassing the router and making tc-netem and tshark only see one direction.
+  docker compose exec -T -u root oqs-locust  ip route add 172.20.0.0/24 via 172.21.0.2
+  docker compose exec -T -u root oqs-nginx   ip route add 172.21.0.0/24 via 172.20.0.2
+}
+
 wait_for_healthy() {
   # Wait for the oqs-nginx container to report a healthy status via its healthcheck.
   # If it does not become healthy within max_wait seconds, logs are dumped and an error is returned.
@@ -55,8 +64,8 @@ start_up_containers() {
   # Only the oqs-nginx service needs to be rebuilt, as the oqs-locust service determines the KEM group at runtime via the OQS_KEM_GROUP environment variable.
   # On the other hand, the nginx.conf file is baked into the oqs-nginx image at build time, so it must be rebuilt for each KEM group.
   render_nginx_conf "${kem_value}"
-  docker compose up -d oqs-nginx 
 
+  docker compose up -d oqs-nginx 
   if ! wait_for_healthy "oqs-nginx"; then
     log "ERROR: nginx did not become healthy for KEM group ${kem_label} (${kem_value})."
     teardown
@@ -70,14 +79,10 @@ start_up_containers() {
     return 1
   fi
 
+  # TODO: Add healthcheck for locust container and wait for container to be healthy
   docker compose up -d oqs-locust
 
-  # Force symmetric routing through the router container so that both directions
-  # of each TCP flow pass through the router's eth0/eth1 interfaces. Without this,
-  # each container routes return traffic via the Docker bridge default gateway,
-  # bypassing the router and making tc-netem and tshark only see one direction.
-  docker compose exec -T -u root oqs-locust  ip route add 172.20.0.0/24 via 172.21.0.2
-  docker compose exec -T -u root oqs-nginx   ip route add 172.21.0.0/24 via 172.20.0.2
+  set_up_routing
 
   if ! validate_forced_routing; then
     log "ERROR: forced routing validation failed for KEM group ${kem_label} (${kem_value})."
