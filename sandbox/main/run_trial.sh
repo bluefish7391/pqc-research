@@ -124,9 +124,11 @@ extract_pcap_metrics() {
 
   docker compose exec -T router \
   tshark -r "${pcap}" -T fields \
-    -e frame.time_epoch -e tcp.stream -e tcp.flags \
-    -e tls.handshake.type -e tls.record.content_type \
-    -E separator=, -E header=y \
+    -e frame.time_epoch -e tcp.stream \
+    -e tcp.time_relative -e tcp.time_delta \
+    -e tcp.flags -e tls.handshake.type -e tls.record.content_type \
+    -E separator=, -E quote=d -E occurrence=a -E aggregator=";" \
+    -E header=y \
     > "${out}" 2>&1 || log "WARNING: tshark summary failed for ${run_id}"
 }
 
@@ -292,7 +294,7 @@ run_one_combination() {
   docker compose exec -T -u root router pkill -SIGINT tshark 2>/dev/null || true
   wait $TSHARK_PID 2>/dev/null || true
 
-  extract_pcap_metrics "${run_id}" "${run_results_dir}"
+  # extract_pcap_metrics "${run_id}" "${run_results_dir}"
   write_throttle_stats "${run_id}" throttle_capture_ok throttle_snapshots_before throttle_snapshots_after
 
   # Checks if any CSV output files match the the expected pattern before attempting to move them to the results directory.
