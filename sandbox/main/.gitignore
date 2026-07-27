@@ -2,9 +2,10 @@
 certs/
 
 # Results and analysis
-results/
+data/*
 figures/
 pcaps/
+cleaned-data/*
 
 # Generated files
 locust/__pycache__/
@@ -12,3 +13,8 @@ locust/nginx.conf
 locust/results*
 logs/
 nginx/nginx.conf
+locust/*.log
+
+# Python
+.venv/
+__pycache__/

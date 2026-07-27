@@ -1,7 +1,51 @@
+# Must match the --processes value passed to the locust invocation below —
+# kept as one variable so the two can't silently drift apart.
+LOCUST_PROCESSES=2
 
-# Sets how fast Locust ramps to the target user count.
-# Can be adjusted later to implement warm up periods and avoid excessive load spikes.
-SPAWN_RATE_FN() { echo "$1"; }
+pin_locust_workers_to_cores() {
+  # Discovers the currently-running locust worker PIDs inside oqs-locust using
+  # 'docker top' and pins each one to a distinct core via host-level taskset.
+  local cores=("$@")   # e.g. pin_locust_workers_to_cores 1 2
+  local total_expected=$(( LOCUST_PROCESSES + 1 ))  # +1 for the master
+  local max_wait=15
+  local waited=0
+  local pids=()
+
+  log "Waiting for ${total_expected} locust process(es) (1 master + ${LOCUST_PROCESSES} workers) to appear..."
+
+  while true; do
+    # Use docker top to get PIDs and command names from the host perspective.
+    readarray -t pids < <(docker top oqs-locust -eo pid,comm 2>/dev/null \
+      | awk '$2 ~ /locust/ {print $1}' | sort -n)
+
+    if (( ${#pids[@]} >= total_expected )); then
+      break
+    fi
+
+    if (( waited >= max_wait )); then
+      log "WARNING: Only found ${#pids[@]} locust process(es) after ${max_wait}s (expected ${total_expected}); skipping CPU pinning for this run."
+      return 1
+    fi
+
+    sleep 0.5
+    waited=$(( waited + 1 ))
+  done
+
+  local worker_pids=("${pids[@]:1}")  # drop the lowest PID (the master)
+  local i pid core
+
+  for i in "${!worker_pids[@]}"; do
+    pid="${worker_pids[${i}]}"
+    core="${cores[$(( i % ${#cores[@]} ))]}"  # round-robin if workers > cores given
+
+    # Run taskset directly on the host using the container's host-mapped PID
+    if sudo -n taskset -cp "${core}" "${pid}" >/dev/null 2>&1; then
+      log "Pinned locust worker host-pid=${pid} to core ${core}."
+    else
+      log "WARNING: Failed to pin locust worker host-pid=${pid} to core ${core} (taskset missing, permission denied, or process already exited)."
+    fi
+  done
+}
 
 THROTTLE_ALIASES=(lt rt ws)
 THROTTLE_METRICS=(nr_periods nr_throttled throttled_usec)
@@ -36,7 +80,7 @@ init_throttle_stats_csv() {
       if ! metric_suffix="$(throttle_metric_suffix "${metric}")"; then
         return 1
       fi
-      header+=",${alias}_${metric_suffix}_delta"
+      header+=",${alias}_${metric_suffix}_before,${alias}_${metric_suffix}_after"
     done
   done
 
@@ -73,20 +117,18 @@ capture_throttle_stats_batch() {
 }
 
 extract_pcap_metrics() {
-  # TODO: This function currently only extracts a basic retransmission summary.
-  # Before real data collection, expand to extract:
-  #   - Total handshake bytes (ClientHello size, server handshake size, total)
-  #   - Handshake packet count and TCP segment count per stream
-  #   - Per-stream retransmission count (not just aggregate)
-
   local run_id="$1"
+  local run_results_dir="$2"
   local pcap="/mnt/pcaps/${run_id}.pcap"
-  local out="${RESULTS_DIR}/pcap_summary_${run_id}.csv"
+  local out="${run_results_dir}/pcap_summary_${run_id}.csv"
 
-  # Use tshark to read the pcap file and generate a summary of TCP retransmissions, writing the output to a CSV file in the results directory.
   docker compose exec -T router \
-    tshark -r "${pcap}" -q \
-      -z "io,stat,0,tcp.len,tcp.analysis.retransmission" \
+  tshark -r "${pcap}" -T fields \
+    -e frame.time_epoch -e tcp.stream \
+    -e tcp.time_relative -e tcp.time_delta \
+    -e tcp.flags -e tls.handshake.type -e tls.record.content_type \
+    -E separator=, -E quote=d -E occurrence=a -E aggregator=";" \
+    -E header=y \
     > "${out}" 2>&1 || log "WARNING: tshark summary failed for ${run_id}"
 }
 
@@ -98,11 +140,13 @@ run_one_combination() {
   local loss_pct="$5"
   local repetition="$6"
   local trial_number="$7"
-  local spawn_rate="$(SPAWN_RATE_FN "${users}")"
 
   local run_id="${kem_label}_u${users}_rtt${rtt_ms}ms_loss${loss_pct}pct_rep${repetition}"
+  local run_results_dir="${RESULTS_DIR}/${run_id}"
+  mkdir -p "${run_results_dir}"
+
   log "════════════════════════════════════════════════════════════"
-  log "RUN(${trial_number}/${total_trials}): kem=${kem_label} (${kem_value})  users=${users}  rtt=${rtt_ms}ms  loss=${loss_pct}%  duration=${DURATION}"
+  log "RUN(${trial_number}/${total_trials}): kem=${kem_label} (${kem_value})  users=${users}  rtt=${rtt_ms}ms  loss=${loss_pct}% repetition=${repetition}"
   log "════════════════════════════════════════════════════════════"
 
   log "Resetting network conditions..."
@@ -118,7 +162,7 @@ run_one_combination() {
   # Start tshark in the background to capture packets on eth0, filtering for traffic to/from the oqs-nginx container on port 4433.
   # Write the captured packets to a pcap file named after the run_id in the PCAP_DIR.
   # Start tshark and capture stderr so we can detect readiness text.
-  tshark_log="${RESULTS_DIR}/tshark_${run_id}.log"
+  tshark_log="${run_results_dir}/tshark_${run_id}.log"
   local pcap_path="/mnt/pcaps/${run_id}.pcap"
   NGINX_IFACE=$(docker compose exec -T -u root router \
     sh -c "ip -o addr show | awk '/172\\.20\\.0\\.2/{print \$2}'" \
@@ -151,14 +195,19 @@ run_one_combination() {
     elapsed=$((elapsed + 1))
   done
 
-  local cpu_log_file="${RESULTS_DIR}/cpu_matrix_${run_id}.csv"
-  echo "Timestamp,Container,CPU_Pct,Mem_Usage,Net_IO_Rx_Tx" > "${cpu_log_file}"
+  local locust_cpu_log_file="${run_results_dir}/locust_cpu_matrix_${run_id}.csv"
+  local nginx_cpu_log_file="${run_results_dir}/nginx_cpu_matrix_${run_id}.csv"
+  echo "Timestamp,CPU_Pct,Mem_Usage,Net_IO_Rx_Tx" > "${locust_cpu_log_file}"
+  echo "Timestamp,CPU_Pct,Mem_Usage,Net_IO_Rx_Tx" > "${nginx_cpu_log_file}"
 
   log "Spawning background monitor (waiting for locust to spin up)..."
   (
     until docker top oqs-locust 2>/dev/null | grep -E "locust" >/dev/null 2>&1; do
       sleep 0.2
     done
+
+    # Pin each locust worker to its own distinct core, discovered dynamically
+    pin_locust_workers_to_cores 1 2
 
     log "Locust detected! Starting container-level resource monitor..."
 
@@ -171,12 +220,16 @@ run_one_combination() {
     next_tick=$(date +%s%N)
 
     while true; do
-      current_time=$(date '+%Y-%m-%d %H:%M:%S')
+      current_time=$(date +%s%N)
 
       docker stats --no-stream --format '{{.Name}},{{.CPUPerc}},{{.MemUsage}},{{.NetIO}}' oqs-locust oqs-nginx 2>/dev/null \
         | while IFS=',' read -r c_name cpu_perc mem_schema net_io; do
             if [ -n "$c_name" ] && [ -n "$cpu_perc" ] && [ -n "$mem_schema" ]; then
-              echo "${current_time},${c_name},${cpu_perc},${mem_schema},${net_io}" >> "${cpu_log_file}"
+              if [ "$c_name" = "oqs-locust" ]; then
+                echo "${current_time},${cpu_perc},${mem_schema},${net_io}" >> "${locust_cpu_log_file}"
+              elif [ "$c_name" = "oqs-nginx" ]; then
+                echo "${current_time},${cpu_perc},${mem_schema},${net_io}" >> "${nginx_cpu_log_file}"
+              fi
             fi
           done
 
@@ -206,17 +259,21 @@ run_one_combination() {
 
   if [ "${throttle_capture_ok}" -eq 1 ]; then
     log "Starting headless Locust run..."
-    docker compose exec -T oqs-locust \
+    docker compose exec -T \
+      -e RUN_ID="${run_id}" \
+      -e TARGET_HANDSHAKES="${TARGET_HANDSHAKES}" \
+      oqs-locust \
       locust \
         --locustfile /mnt/locust/locustfile.py \
         --host https://oqs-nginx:4433 \
         --headless \
         --only-summary \
         --users "${users}" \
-        --spawn-rate "${spawn_rate}" \
-        --run-time "${DURATION}" \
+        --spawn-rate "${SPAWN_RATE}" \
+        --run-time "${MAX_DURATION}" \
+        --stop-timeout 5 \
         --csv "/mnt/locust/results_${run_id}" \
-        --csv-full-history \
+        --processes "${LOCUST_PROCESSES}" \
       || log "WARNING: locust exited non-zero for ${run_id} (check stats before discarding the run)"
 
     if ! capture_throttle_stats_batch "after" throttle_snapshots_after; then
@@ -224,6 +281,8 @@ run_one_combination() {
       throttle_capture_ok=0
     fi
   fi
+
+  log "Load test complete. Stopping background monitor and tshark..."
 
   kill "${SAMPLER_PID}" 2>/dev/null || true
   pkill -P "${SAMPLER_PID}" 2>/dev/null || true
@@ -235,16 +294,18 @@ run_one_combination() {
   docker compose exec -T -u root router pkill -SIGINT tshark 2>/dev/null || true
   wait $TSHARK_PID 2>/dev/null || true
 
-  extract_pcap_metrics "${run_id}"
+  # extract_pcap_metrics "${run_id}" "${run_results_dir}"
   write_throttle_stats "${run_id}" throttle_capture_ok throttle_snapshots_before throttle_snapshots_after
 
   # Checks if any CSV output files match the the expected pattern before attempting to move them to the results directory.
   if compgen -G "${LOCUST_OUT_DIR}/results_${run_id}*" > /dev/null; then
-    mv "${LOCUST_OUT_DIR}"/results_"${run_id}"* "${RESULTS_DIR}/"
-    log "Moved results_${run_id}* to ${RESULTS_DIR}/"
+    mv "${LOCUST_OUT_DIR}"/results_"${run_id}"* "${run_results_dir}/"
+    mv "${LOCUST_OUT_DIR}/${run_id}"* "${LOG_DIR}/"
   else
     log "WARNING: no CSV output found for ${run_id} — check locust container logs."
   fi
+
+  log "Data collection complete."
 }
 
 record_throttle_stats_for_container() {
@@ -306,9 +367,8 @@ write_throttle_stats() {
         log "ERROR: Missing metric ${metric} for alias ${alias} (run ${run_id})"
         return 1
       fi
-
-      delta=$((after_stats_ref[${metric}] - before_stats_ref[${metric}]))
-      row+=",${delta}"
+      
+      row+=",${before_stats_ref[${metric}]},${after_stats_ref[${metric}]}"
     done
   done
 

@@ -118,7 +118,7 @@ start_up_containers() {
   local kem_label="$1"
   local kem_value="$2"
 
-  teardown
+  # teardown
 
   log "Starting up containers for KEM group ${kem_label} (${kem_value})..."
 
