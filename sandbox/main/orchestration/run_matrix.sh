@@ -76,8 +76,8 @@ TARGET_HANDSHAKES=10000 # Total number of handshakes to perform in each trial.
 MAX_DURATION="10000s" # Headless Locust run max duration per combination (seconds).
 REPETITIONS_PER_TEST=1 # Number of times to repeat each combination for averaging or variance analysis.
 
-# Identifies the name of this file, then the directory containing said file, and sets PROJECT_DIR to that path.
-PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Identifies the name of this file, then the directory containing said file, and sets PROJECT_DIR to the parent of said directory.
+PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 NGINX_TMPL="${PROJECT_DIR}/nginx/nginx.conf.tmpl"
 NGINX_CONF="${PROJECT_DIR}/nginx/nginx.conf"
