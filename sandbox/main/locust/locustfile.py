@@ -8,6 +8,7 @@ import io
 import gevent
 from gevent import util as gevent_util
 from locust import User, task, constant, events
+from locust.runners import MasterRunner, WorkerRunner
 import csv
 
 # Configuration and global variables
@@ -72,10 +73,59 @@ def dump_greenlets(signum, frame):
 
 signal.signal(signal.SIGUSR1, dump_greenlets)
 
+# To keep TARGET_HANDSHAKES meaning "total across all workers", we only ever
+# treat this counter as authoritative on the MASTER process. Workers report
+# each completed request to the master via Locust's runner message-passing
+# API (environment.runner.send_message), and only the master's registered
+# handler increments this variable and decides when to call runner.quit().
+#
+# In "local" mode (no --processes flag, single in-process runner, used e.g.
+# for quick manual debugging), there is no master/worker split at all, so we
+# fall back to the original local-counting behavior directly.
 completed_handshakes = 0
 stop_requested = False
 
-def _check_stop_condition(environment):
+@events.init.add_listener
+def on_locust_init(environment, **kwargs):
+    """
+    Fires exactly once per process (master, each worker, or the single
+    'local' runner when --processes is not used), right after that
+    process's runner is created. Used here to set up the master-side
+    message handler that aggregates completed-handshake counts reported
+    by every worker, so the TARGET_HANDSHAKES stopping condition applies
+    to the sum across all workers rather than to each worker individually.
+    """
+    if isinstance(environment.runner, MasterRunner):
+        def on_handshake_done(environment, msg, **kwargs):
+            global completed_handshakes, stop_requested
+            completed_handshakes += msg.data["count"]
+            if completed_handshakes >= TARGET_HANDSHAKES and not stop_requested:
+                log.info(
+                    f"Target of {TARGET_HANDSHAKES} handshakes reached "
+                    f"({completed_handshakes}, aggregated across all workers). Stopping runner."
+                )
+                stop_requested = True
+                environment.runner.quit()
+
+        environment.runner.register_message("handshake_done", on_handshake_done)
+        log.info("Master: registered 'handshake_done' message handler for cross-worker stop condition.")
+
+    elif isinstance(environment.runner, WorkerRunner):
+        # Nothing to register on workers — they only ever send "handshake_done"
+        # messages, from inside _fire_request below, once per completed request.
+        log.info("Worker: will report completed handshakes to master via 'handshake_done' messages.")
+
+    else:
+        # "local" mode: single process, no master/worker split, so the original
+        # local-counting/local-quit logic (see _check_stop_condition_local below)
+        # is used directly instead of message passing.
+        log.info("Local (non-distributed) mode: using local stop-condition counting.")
+
+
+def _check_stop_condition_local(environment):
+    """
+    Fallback stop-condition check for local (non-distributed) runs only
+    """
     global completed_handshakes, stop_requested
     completed_handshakes += 1
     if completed_handshakes >= TARGET_HANDSHAKES and not stop_requested:
@@ -173,6 +223,9 @@ class TLSHandshakeUser(User):
                 context         = {"request_id": request_id, "greenlet_id": self.greenlet_id, "start_time_ns": start_time},
             )
 
-        # Check if the target number of handshakes has been reached and stop the Locust runner if so.
         finally:
-            _check_stop_condition(self.environment)
+            runner = self.environment.runner
+            if isinstance(runner, WorkerRunner):
+                runner.send_message("handshake_done", {"count": 1})
+            else:
+                _check_stop_condition_local(self.environment)
