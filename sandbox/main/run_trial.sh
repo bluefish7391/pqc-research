@@ -3,15 +3,8 @@
 LOCUST_PROCESSES=2
 
 pin_locust_workers_to_cores() {
-  # Discovers the currently-running locust worker PIDs inside oqs-locust and
-  # pins each one to a distinct core via taskset, rather than assuming fixed
-  # PID numbers (which are not stable across runs/containers).
-  #
-  # The master process is spawned first and will have the lowest PID; the
-  # worker processes fork from it afterward and will have higher PIDs, in
-  # spawn order. Sorting numerically and dropping the first entry reliably
-  # isolates the workers without needing to distinguish them by command
-  # line (which looks identical across master/workers).
+  # Discovers the currently-running locust worker PIDs inside oqs-locust using
+  # 'docker top' and pins each one to a distinct core via host-level taskset.
   local cores=("$@")   # e.g. pin_locust_workers_to_cores 1 2
   local total_expected=$(( LOCUST_PROCESSES + 1 ))  # +1 for the master
   local max_wait=15
@@ -21,7 +14,8 @@ pin_locust_workers_to_cores() {
   log "Waiting for ${total_expected} locust process(es) (1 master + ${LOCUST_PROCESSES} workers) to appear..."
 
   while true; do
-    readarray -t pids < <(docker exec oqs-locust ps -eo pid,comm 2>/dev/null \
+    # Use docker top to get PIDs and command names from the host perspective.
+    readarray -t pids < <(docker top oqs-locust -eo pid,comm 2>/dev/null \
       | awk '$2 ~ /locust/ {print $1}' | sort -n)
 
     if (( ${#pids[@]} >= total_expected )); then
@@ -44,10 +38,11 @@ pin_locust_workers_to_cores() {
     pid="${worker_pids[${i}]}"
     core="${cores[$(( i % ${#cores[@]} ))]}"  # round-robin if workers > cores given
 
-    if docker exec oqs-locust taskset -cp "${core}" "${pid}" >/dev/null 2>&1; then
-      log "Pinned locust worker pid=${pid} to core ${core}."
+    # Run taskset directly on the host using the container's host-mapped PID
+    if sudo -n taskset -cp "${core}" "${pid}" >/dev/null 2>&1; then
+      log "Pinned locust worker host-pid=${pid} to core ${core}."
     else
-      log "WARNING: Failed to pin locust worker pid=${pid} to core ${core} (taskset missing, or process already exited)."
+      log "WARNING: Failed to pin locust worker host-pid=${pid} to core ${core} (taskset missing, permission denied, or process already exited)."
     fi
   done
 }
@@ -297,7 +292,7 @@ run_one_combination() {
   docker compose exec -T -u root router pkill -SIGINT tshark 2>/dev/null || true
   wait $TSHARK_PID 2>/dev/null || true
 
-  # extract_pcap_metrics "${run_id}"
+  extract_pcap_metrics "${run_id}" "${run_results_dir}"
   write_throttle_stats "${run_id}" throttle_capture_ok throttle_snapshots_before throttle_snapshots_after
 
   # Checks if any CSV output files match the the expected pattern before attempting to move them to the results directory.
