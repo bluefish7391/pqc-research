@@ -9,7 +9,7 @@
 set -euo pipefail
 
 source ./vars.sh
-source ./parse_args.sh
+source ./resume_sweep.sh
 source ./run_trial.sh
 source ./start_containers.sh
 
@@ -19,16 +19,8 @@ source ./start_containers.sh
 # this shell session, including docker compose itself.
 export MSYS_NO_PATHCONV=1
 
-RESUME_MODE=0
-RESUME_COLLECTION_NAME=""
-RESUME_TRIAL_START=""
-RESUME_TRIAL_END=""
-
-parse_args "$@"
-
-# KEM_GROUPS is an associative array (like a dictionary or a hashmap) mapping
-# a human-readable label to the corresponding OpenSSL group name. The label 
-# is used in output filenames and logs.
+resume_init_state # Declares and initializes variables related to resuming a sweep.
+resume_parse_args "$@" # Parses command-line arguments to determine if the script should resume a previous sweep or start a new one. Sets associated variables accordingly.
 
 # Identifies the name of this file, then the directory containing said file, and sets PROJECT_DIR to the parent of said directory.
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -37,20 +29,8 @@ NGINX_TMPL="${PROJECT_DIR}/nginx/nginx.conf.tmpl"
 NGINX_CONF="${PROJECT_DIR}/nginx/nginx.conf"
 
 DATA_DIR="${PROJECT_DIR}/data"
-if (( RESUME_MODE == 1 )); then
-  if [[ "${RESUME_COLLECTION_NAME}" == *"/"* ]]; then
-    echo "ERROR: Resume collection name must be a directory name under ${DATA_DIR}, not a path: ${RESUME_COLLECTION_NAME}" >&2
-    exit 1
-  fi
-
-  COLLECTION_DIR="${DATA_DIR}/${RESUME_COLLECTION_NAME}"
-  if [[ ! -d "${COLLECTION_DIR}" ]]; then
-    echo "ERROR: Resume collection directory does not exist: ${COLLECTION_DIR}" >&2
-    exit 1
-  fi
-else
-  COLLECTION_DIR="${DATA_DIR}/pre-pilot"
-fi
+resume_resolve_collection_dir "${DATA_DIR}"
+COLLECTION_DIR="${RESUME_COLLECTION_DIR}"
 
 RESULTS_DIR="${COLLECTION_DIR}/results"
 export PCAP_DIR="${COLLECTION_DIR}/pcaps" # Needs to be exported so that the compose file can access it as an environment variable for volume mounting.
@@ -79,8 +59,6 @@ EOF
   } >> "${COLLECTION_DIR}/run_info.txt"
 fi
 
-# == Helpers ==================================================================
-
 if (( RESUME_MODE == 0 )); then
   init_throttle_stats_csv
 fi
@@ -108,33 +86,13 @@ main() {
   local total_combinations=$(( ${#KEM_GROUPS[@]} * ${#USER_LEVELS[@]} * ${#RTTS[@]} * ${#LOSS_LEVELS[@]} ))
   local total_trials=$(( total_combinations * REPETITIONS_PER_TEST ))
 
-  local TRIALS_TO_SKIP_AT_START=0 # Derived from resume start trial when resuming an interrupted sweep.
-  local TRIALS_TO_SKIP_AT_END=0 # Derived from resume end trial when resuming an interrupted sweep.
-
-  if (( RESUME_MODE == 1 )); then
-    if [[ ! "${RESUME_TRIAL_START}" =~ ^[0-9]+$ ]] || [[ ! "${RESUME_TRIAL_END}" =~ ^[0-9]+$ ]]; then
-      log "ERROR: Resume trial bounds must be positive integers."
-      return 1
-    fi
-
-    if (( RESUME_TRIAL_START < 1 )); then
-      log "ERROR: Resume start trial must be at least 1."
-      return 1
-    fi
-
-    if (( RESUME_TRIAL_END < RESUME_TRIAL_START )); then
-      log "ERROR: Resume end trial must be greater than or equal to the start trial."
-      return 1
-    fi
-
-    if (( RESUME_TRIAL_END > total_trials )); then
-      log "ERROR: Resume end trial ${RESUME_TRIAL_END} exceeds total trials ${total_trials}."
-      return 1
-    fi
-
-    TRIALS_TO_SKIP_AT_START=$(( RESUME_TRIAL_START - 1 ))
-    TRIALS_TO_SKIP_AT_END=$(( total_trials - RESUME_TRIAL_END ))
+  if ! resume_compute_skip_window "${total_trials}"; then
+    log "ERROR: Failed to compute resume trial window."
+    return 1
   fi
+
+  local TRIALS_TO_SKIP_AT_START="${RESUME_TRIALS_TO_SKIP_AT_START}" # Derived from resume start trial when resuming an interrupted sweep.
+  local TRIALS_TO_SKIP_AT_END="${RESUME_TRIALS_TO_SKIP_AT_END}" # Derived from resume end trial when resuming an interrupted sweep.
 
   # Ensure a clean slate before the sweep starts.
   teardown
