@@ -3,8 +3,10 @@
 # Simply calls run_matrix.sh, which handles the actual orchestration of the benchmarking trials.
 
 main() {
-  # Call the run_matrix.sh script to perform the benchmarking trials.
-  ./run_matrix.sh "$@"
+  # Call the orchestration entrypoint relative to this file's directory.
+  local script_dir
+  script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  "${script_dir}/orchestration/run_matrix.sh" "$@"
 }
 
 main "$@"

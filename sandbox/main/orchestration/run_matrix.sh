@@ -8,13 +8,15 @@
 # Set strict mode for bash: exit on error, treat unset variables as errors, and fail on any command in a pipeline that fails.
 set -euo pipefail
 
-source ./vars.sh
-source ./helpers.sh
-source ./resume_sweep.sh
-source ./init_paths.sh
-source ./init_logs.sh
-source ./run_trial.sh
-source ./start_containers.sh
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+source "${SCRIPT_DIR}/experimental_vars.sh"
+source "${SCRIPT_DIR}/helpers.sh"
+source "${SCRIPT_DIR}/resume_sweep.sh"
+source "${SCRIPT_DIR}/init_paths.sh"
+source "${SCRIPT_DIR}/init_logs.sh"
+source "${SCRIPT_DIR}/run_trial.sh"
+source "${SCRIPT_DIR}/start_containers.sh"
 
 # Disable automatic path conversion on Windows (MSYS2 / Git Bash) to avoid
 # issues with volume mounts and file paths in docker compose.

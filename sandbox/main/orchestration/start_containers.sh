@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 
-source check_containers.sh
-source helpers.sh
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+source "${SCRIPT_DIR}/check_containers.sh"
+source "${SCRIPT_DIR}/helpers.sh"
 
 render_nginx_conf() {
   local kem_value="$1"

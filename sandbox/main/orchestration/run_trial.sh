@@ -1,3 +1,9 @@
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+source "${SCRIPT_DIR}/helpers.sh"
+source "${SCRIPT_DIR}/capture_throttle.sh"
+
 # Must match the --processes value passed to the locust invocation below —
 # kept as one variable so the two can't silently drift apart.
 LOCUST_PROCESSES=2
