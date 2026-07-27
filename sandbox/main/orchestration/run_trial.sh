@@ -68,30 +68,6 @@ throttle_metric_suffix() {
   esac
 }
 
-init_throttle_stats_csv() {
-  local out_file="${RESULTS_DIR}/throttle_stats.csv"
-  local header="run_id"
-  local alias
-  local metric
-  local metric_suffix
-
-  for alias in "${THROTTLE_ALIASES[@]}"; do
-    for metric in "${THROTTLE_METRICS[@]}"; do
-      if ! metric_suffix="$(throttle_metric_suffix "${metric}")"; then
-        return 1
-      fi
-      header+=",${alias}_${metric_suffix}_before,${alias}_${metric_suffix}_after"
-    done
-  done
-
-  header+=",capture_status"
-
-  if ! printf '%s\n' "${header}" > "${out_file}"; then
-    log "ERROR: Failed to initialize ${out_file}"
-    return 1
-  fi
-}
-
 capture_throttle_stats_batch() {
   local phase="$1"
   local -n snapshot_map_ref="$2"

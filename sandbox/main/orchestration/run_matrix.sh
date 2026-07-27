@@ -11,6 +11,7 @@ set -euo pipefail
 source ./vars.sh
 source ./helpers.sh
 source ./resume_sweep.sh
+source ./init_logs.sh
 source ./run_trial.sh
 source ./start_containers.sh
 
@@ -45,37 +46,15 @@ LOCUST_OUT_DIR="${PROJECT_DIR}/locust"
 mkdir -p "${COLLECTION_DIR}" "${RESULTS_DIR}" "${PCAP_DIR}" "${LOG_DIR}"
 touch "${MAIN_LOG_FILE}" "${COLLECTION_DIR}/run_info.txt"
 
-if (( RESUME_MODE == 0 )); then
-  {
-    cat << EOF
-Run info for matrix sweep started at $(date '+%Y-%m-%d %H:%M:%S')
-KEM groups: ${!KEM_GROUPS[*]}
-User levels: ${USER_LEVELS[*]}
-RTTs (ms): ${RTTS[*]}
-Loss levels (%): ${LOSS_LEVELS[*]}
-Target handshakes per trial: ${TARGET_HANDSHAKES}
-Max duration per run: ${MAX_DURATION}
-Repetitions per test: ${REPETITIONS_PER_TEST}
-EOF
-  } >> "${COLLECTION_DIR}/run_info.txt"
-fi
-
-if (( RESUME_MODE == 0 )); then
-  init_throttle_stats_csv
-fi
-
 main() {
-  log "Starting KD protocol benchmark matrix sweep."
   if (( RESUME_MODE == 1 )); then
+    log "════════════════════════════════════════════════════════════"
     log "Resuming interrupted sweep in ${COLLECTION_DIR}."
     log "Resume window: trials ${RESUME_TRIAL_START}-${RESUME_TRIAL_END}."
+    log "════════════════════════════════════════════════════════════"
+  else
+    init_logs
   fi
-  log "KEM groups: ${!KEM_GROUPS[*]}"
-  log "User levels: ${USER_LEVELS[*]}"
-  log "RTTs (ms): ${RTTS[*]}"
-  log "Loss levels (%): ${LOSS_LEVELS[*]}"
-  log "Target handshakes per trial: ${TARGET_HANDSHAKES}"
-  log "Max duration per run: ${MAX_DURATION}"
 
   cd "${PROJECT_DIR}"
 
