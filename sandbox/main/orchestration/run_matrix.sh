@@ -1,24 +1,14 @@
 #!/usr/bin/env bash
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-#  run_matrix.sh — KD Protocol Benchmarking PoC orchestrator
-#
-#  Sweeps: KEM_GROUPS (classical / hybrid / pure-pq) x USER_LEVELS (-u)
-#  For each combination:
-#    1. Render nginx.conf from template with the target KEM group
-#    2. docker compose down -v   (full teardown — clean isolation)
-#    3. docker compose up -d --build
-#    4. Wait for oqs-nginx healthcheck
-#    5. Run Locust in headless mode for DURATION seconds at -u USERS
-#    6. Copy/rename the resulting CSV stats with a combo-specific name
-#    7. Teardown again before the next combination
-#
+# ========================================================================
 #  Usage:
 #    ./run_matrix.sh
 #    ./run_matrix.sh --resume <collection_name> <start_trial> <end_trial>
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# ========================================================================
 
+# Set strict mode for bash: exit on error, treat unset variables as errors, and fail on any command in a pipeline that fails.
 set -euo pipefail
 
+source ./parse_args.sh
 source ./run_trial.sh
 source ./start_containers.sh
 
@@ -33,27 +23,6 @@ RESUME_COLLECTION_NAME=""
 RESUME_TRIAL_START=""
 RESUME_TRIAL_END=""
 
-parse_args() {
-  if [[ "$#" -eq 0 ]]; then
-    return 0
-  fi
-
-  if [[ "$1" != "--resume" ]]; then
-    echo "ERROR: Unknown argument: $1" >&2
-    exit 1
-  fi
-
-  if [[ "$#" -ne 4 ]]; then
-    echo "ERROR: Invalid number of arguments for --resume." >&2
-    exit 1
-  fi
-
-  RESUME_MODE=1
-  RESUME_COLLECTION_NAME="$2"
-  RESUME_TRIAL_START="$3"
-  RESUME_TRIAL_END="$4"
-}
-
 parse_args "$@"
 
 # KEM_GROUPS is an associative array (like a dictionary or a hashmap) mapping
@@ -62,7 +31,6 @@ parse_args "$@"
 declare -A KEM_GROUPS=(
   ["classical"]="X25519"
   ["hybrid"]="X25519MLKEM768"
-  # ["pure768"]="MLKEM768"
 )
 
 readarray -t sorted_kem_labels < <(printf '%s\n' "${!KEM_GROUPS[@]}" | sort)
