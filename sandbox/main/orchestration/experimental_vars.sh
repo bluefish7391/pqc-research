@@ -18,6 +18,7 @@ declare -A NETWORK_CONDITIONS=(
   ["B3"]="rtt=100ms loss=2%"
   ["B4"]="rtt=200ms loss=5%"
 )
+readarray -t sorted_network_labels < <(printf '%s\n' "${!NETWORK_CONDITIONS[@]}" | sort)
 
 TARGET_HANDSHAKES=1000 # Total number of handshakes to perform in each trial.
 MAX_DURATION="1000s" # Headless Locust run max duration per combination (seconds).
