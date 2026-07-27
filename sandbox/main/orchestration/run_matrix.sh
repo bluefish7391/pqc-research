@@ -81,10 +81,6 @@ fi
 
 # == Helpers ==================================================================
 
-log() {
-  echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" | tee -a "${MAIN_LOG_FILE}"
-}
-
 if (( RESUME_MODE == 0 )); then
   init_throttle_stats_csv
 fi
