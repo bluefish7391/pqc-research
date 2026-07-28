@@ -70,10 +70,6 @@ run_one_combination() {
   log "RUN(${trial_number}/${total_trials}): kem=${kem_label} (${kem_value})  users=${users}  rtt=${rtt_ms}ms  loss=${loss_pct}% repetition=${repetition}"
   log "════════════════════════════════════════════════════════════"
 
-  log "Resetting network conditions..."
-  docker compose exec -T -u root router tc qdisc del dev eth0 root netem || true
-  docker compose exec -T -u root router tc qdisc del dev eth1 root netem || true
-
   log "Injecting network conditions: ${rtt_ms}ms round-trip delay, ${loss_pct}% loss..."
   # The tc command adds a queuing discipline (qdisc) to the eth0 network interface of the router container, introducing artificial latency and packet loss.
   # especially with packet loss.
