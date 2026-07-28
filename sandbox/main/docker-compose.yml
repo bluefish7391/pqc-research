@@ -104,10 +104,10 @@ services:
         condition: service_healthy
       router:
         condition: service_healthy
-    cpuset: "1,2"
+    cpuset: "1,2,3,4"
     deploy:
       resources:
         limits:
-          cpus:   "2.0"
+          cpus:   "4.0"
           memory: 512M
     restart: on-failure

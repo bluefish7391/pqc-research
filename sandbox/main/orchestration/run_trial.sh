@@ -6,7 +6,7 @@ source "${SCRIPT_DIR}/capture_throttle.sh"
 
 # Must match the --processes value passed to the locust invocation below —
 # kept as one variable so the two can't silently drift apart.
-LOCUST_PROCESSES=2
+LOCUST_PROCESSES=4
 
 pin_locust_workers_to_cores() {
   # Discovers the currently-running locust worker PIDs inside oqs-locust using
@@ -124,7 +124,7 @@ run_one_combination() {
     done
 
     # Pin each locust worker to its own distinct core, discovered dynamically
-    pin_locust_workers_to_cores 1 2
+    pin_locust_workers_to_cores 1 2 3 4
 
     log "Locust detected! Starting container-level resource monitor..."
 
