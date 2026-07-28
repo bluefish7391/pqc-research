@@ -9,8 +9,6 @@ readarray -t sorted_kem_labels < <(printf '%s\n' "${!KEM_GROUPS[@]}" | sort)
 
 SPAWN_RATE=25
 USER_LEVELS=(1 10 25 100) # Number of concurrent users to simulate in Locust. This is the -u parameter for locust.
-RTTS=(200)         # Round-trip time in milliseconds. This is the artificial latency that will be introduced in the network emulation.
-LOSS_LEVELS=(0)  # Packet loss percentage. This is the percentage of packets that will be randomly dropped in the network emulation.
 
 declare -A NETWORK_CONDITIONS=(
   ["B1"]="rtt=10ms loss=0%"
