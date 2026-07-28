@@ -176,6 +176,11 @@ run_one_combination() {
 
   if [ "${throttle_capture_ok}" -eq 1 ]; then
     log "Starting headless Locust run..."
+    local locust_log_file="${LOG_DIR}/locust_${run_id}.log"
+    local locust_rc=0
+
+    log "Starting headless Locust run..."
+    set +e
     docker compose exec -T \
       -e RUN_ID="${run_id}" \
       -e TARGET_HANDSHAKES="${TARGET_HANDSHAKES}" \
@@ -191,7 +196,15 @@ run_one_combination() {
         --stop-timeout 5 \
         --csv "/mnt/locust/results_${run_id}" \
         --processes "${LOCUST_PROCESSES}" \
-      || log "WARNING: locust exited non-zero for ${run_id} (check stats before discarding the run)"
+      > >(tee -a "${locust_log_file}") \
+      2> >(tee -a "${locust_log_file}" >&2)
+    locust_rc=$?
+    set -e
+
+    if [ "${locust_rc}" -ne 0 ]; then
+      log "ERROR: locust exited with code ${locust_rc} for ${run_id}. See ${locust_log_file}"
+      docker compose logs --no-color --timestamps oqs-locust | tail -n 200 >> "${locust_log_file}" || true
+    fi
 
     if ! capture_throttle_stats_batch "after" throttle_snapshots_after; then
       log "ERROR: Aborting run due to missing post-run throttle stats for ${run_id}"
