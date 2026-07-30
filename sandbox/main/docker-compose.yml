@@ -69,6 +69,12 @@ services:
       timeout:      2s
       retries:      3
       start_period: 3s
+    cpuset: "5"
+    deploy:
+      resources:
+        limits:
+          cpus:   "1.0"
+          memory: 256M
     restart: on-failure
 
   # ── OQS-Locust: KD-protocol-aware load tester ────────────────────────
