@@ -8,7 +8,7 @@ import io
 import gevent
 from gevent import util as gevent_util
 from locust import User, task, constant, events
-from locust.runners import MasterRunner, WorkerRunner
+from locust.runners import MasterRunner, WorkerRunner # type: ignore
 import csv
 
 # Configuration and global variables
@@ -27,27 +27,6 @@ csv_path = f"/mnt/locust/results_{RUN_ID}_p{WORKER_ID}_requests.csv"
 _csv_file = open(csv_path, "w", newline="")
 _csv_writer = csv.writer(_csv_file)
 _csv_writer.writerow(["request_id", "greenlet_id", "start_time_ns", "response_time_ms", "response_length", "success", "exception"])
-
-KEYLOG_DIR = "/mnt/locust/keylogs"
-os.makedirs(KEYLOG_DIR, exist_ok=True)
-
-
-def _detect_keylogfile_support() -> bool:
-    """Detect whether this openssl s_client build supports -keylogfile."""
-    try:
-        help_proc = subprocess.run(
-            [OPENSSL_BIN, "s_client", "-help"],
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-        help_text = f"{help_proc.stdout}\n{help_proc.stderr}"
-        return "-keylogfile" in help_text
-    except Exception:
-        return False
-
-
-S_CLIENT_SUPPORTS_KEYLOGFILE = _detect_keylogfile_support()
 
 @events.request.add_listener
 def log_request_to_csv(request_type, name, response_time, response_length, exception, context, **kwargs):
@@ -160,9 +139,6 @@ class TLSHandshakeUser(User):
 
     def on_start(self):
         self.greenlet_id = id(gevent.getcurrent())
-        self.keylog_path = f"{KEYLOG_DIR}/{RUN_ID}_{WORKER_ID}_{self.greenlet_id}.log"
-        # Create the file up front so every user has a deterministic artifact.
-        open(self.keylog_path, "a").close()
 
     @task
     def _fire_request(self):
@@ -197,9 +173,6 @@ class TLSHandshakeUser(User):
                 "-quiet", # Suppress unnecessary output, only the HTTP response will be captured.
                 "-nocommands", # Suppress interactive commands, HTTP request will be sent via stdin.
             ]
-            if S_CLIENT_SUPPORTS_KEYLOGFILE:
-                # Prefer the explicit CLI flag for reliable key logging with s_client.
-                s_client_cmd.extend(["-keylogfile", self.keylog_path])
 
             log.info(f"Request start: greenlet_id={self.greenlet_id}, request_id={request_id}, start_time={start_time}, completed_handshakes={completed_handshakes}")
             result = subprocess.run(

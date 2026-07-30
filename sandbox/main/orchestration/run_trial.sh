@@ -218,13 +218,6 @@ run_one_combination() {
   pkill -P "${SAMPLER_PID}" 2>/dev/null || true
   wait "${SAMPLER_PID}" 2>/dev/null || true
 
-  if [ -d "${LOCUST_OUT_DIR}/keylogs" ] && compgen -G "${LOCUST_OUT_DIR}/keylogs/${run_id}_*.log" > /dev/null; then
-    mkdir -p "${LOCUST_OUT_DIR}/keylogs"
-    cat "${LOCUST_OUT_DIR}/keylogs/${run_id}_"*.log > "${LOCUST_OUT_DIR}/keylogs/${run_id}_combined.log"
-  else
-    log "WARNING: no keylog files found for ${run_id}; skipping combined keylog generation."
-  fi
-
   # Terminate the tshark monitor inside the container cleanly by sending a SIGINT signal, which allows tshark to flush its buffers 
   # and write the pcap file properly. This in turn kills the docker compose exec command, which is why the wait command is used to
   # ensure that the tshark process has exited before proceeding.
