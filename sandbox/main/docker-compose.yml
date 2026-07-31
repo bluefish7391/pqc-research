@@ -29,8 +29,6 @@ services:
       - ./nginx/nginx.conf:/opt/nginx/nginx-conf/nginx.conf:ro   # rendered file, not the .tmpl
       - ./nginx/index.html:/opt/nginx/html/index.html:ro
       - ./certs:/certs:ro
-    environment:
-      - TZ=America/New_York
     cpuset: "0"
     deploy:
       resources:
@@ -60,8 +58,6 @@ services:
       - ./router/entrypoint.sh:/entrypoint.sh:ro
       - ${PCAP_DIR:-./data/pcaps}:/mnt/pcaps:rw   # default path for interactive terminal compose commands when PCAP_DIR is unset
     entrypoint: ["/entrypoint.sh"]
-    environment:
-      - TZ=America/New_York
     cap_add:
       - NET_ADMIN
       - NET_RAW
@@ -101,7 +97,6 @@ services:
     extra_hosts:
       - "oqs-nginx:172.20.0.10"
     environment:
-      - TZ=America/New_York
       # IMPORTANT: this must match nginx's ssl_ecdh_curve for the current
       # run, or the handshake fails (client/server must request the same
       # group). run_matrix.sh sets this to the matching value before

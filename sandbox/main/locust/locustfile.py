@@ -20,6 +20,11 @@ RUN_ID = os.getenv("RUN_ID", "").strip()
 WAIT_TIME   = 0.0
 OPENSSL_BIN = "/opt/oqssa/bin/openssl"
 
+# Force timezone to New York time
+os.environ["TZ"] = "EST5EDT,M3.2.0/2,M11.1.0/2"
+if hasattr(time, "tzset"):
+    time.tzset()
+
 WORKER_ID = uuid.uuid1();
 
 # Open once per Locust worker process, at import time
@@ -162,8 +167,8 @@ class TLSHandshakeUser(User):
 
             start_time=time.time_ns()
 
-            env = os.environ.copy()
-            env["SSLKEYLOGFILE"] = self.keylog_path
+            # env = os.environ.copy()
+            # env["SSLKEYLOGFILE"] = self.keylog_path
 
             s_client_cmd = [
                 OPENSSL_BIN, "s_client",
@@ -181,7 +186,7 @@ class TLSHandshakeUser(User):
                 input=HTTP_REQUEST,
                 capture_output=True, # Capture stdout and stderr for analysis.
                 timeout=10, # Set a timeout for the handshake operation to avoid hanging indefinitely. Measured in seconds.
-                env=env,
+                # env=env,
             )
             log.info(f"Request end: greenlet_id={self.greenlet_id}, request_id={request_id}, end_time={time.time_ns()}, completed_handshakes={completed_handshakes}")
 
