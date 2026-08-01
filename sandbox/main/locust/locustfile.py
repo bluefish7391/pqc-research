@@ -27,6 +27,9 @@ if hasattr(time, "tzset"):
 
 WORKER_ID = uuid.uuid1();
 
+KEYLOG_DIR = "/mnt/locust/keylogs"
+os.makedirs(KEYLOG_DIR, exist_ok=True)
+
 # Open once per Locust worker process, at import time
 csv_path = f"/mnt/locust/results_{RUN_ID}_p{WORKER_ID}_requests.csv"
 _csv_file = open(csv_path, "w", newline="")
@@ -144,6 +147,8 @@ class TLSHandshakeUser(User):
 
     def on_start(self):
         self.greenlet_id = id(gevent.getcurrent())
+        self.keylog_path = f"{KEYLOG_DIR}/{RUN_ID}_{uuid.uuid1()}.log"
+        open(self.keylog_path, "a").close()
 
     @task
     def _fire_request(self):
@@ -167,8 +172,8 @@ class TLSHandshakeUser(User):
 
             start_time=time.time_ns()
 
-            # env = os.environ.copy()
-            # env["SSLKEYLOGFILE"] = self.keylog_path
+            env = os.environ.copy()
+            env["SSLKEYLOGFILE"] = self.keylog_path
 
             s_client_cmd = [
                 OPENSSL_BIN, "s_client",
@@ -177,6 +182,7 @@ class TLSHandshakeUser(User):
                 "-no_ticket", # Disable session tickets to ensure a full handshake is performed.
                 "-quiet", # Suppress unnecessary output, only the HTTP response will be captured.
                 "-nocommands", # Suppress interactive commands, HTTP request will be sent via stdin.
+                "-keylogfile", self.keylog_path,
             ]
 
             log.info(f"Request start: greenlet_id={self.greenlet_id}, request_id={request_id}, start_time={start_time}, completed_handshakes={completed_handshakes}")
@@ -186,7 +192,7 @@ class TLSHandshakeUser(User):
                 input=HTTP_REQUEST,
                 capture_output=True, # Capture stdout and stderr for analysis.
                 timeout=10, # Set a timeout for the handshake operation to avoid hanging indefinitely. Measured in seconds.
-                # env=env,
+                env=env,
             )
             log.info(f"Request end: greenlet_id={self.greenlet_id}, request_id={request_id}, end_time={time.time_ns()}, completed_handshakes={completed_handshakes}")
 
