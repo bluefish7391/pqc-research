@@ -224,9 +224,11 @@ run_one_combination() {
   docker compose exec -T -u root router pkill -SIGINT tshark 2>/dev/null || true
   wait $TSHARK_PID 2>/dev/null || true
 
+  write_keylog "${run_results_dir}"  # Combine all keylog files into one for easier analysis.
+  extract_pcap_metrics "${run_id}" "${run_results_dir}" "/mnt/pcaps/${run_id}.pcap" "/mnt/keylogs/${run_id}_combined.log"
   write_throttle_stats "${run_id}" throttle_capture_ok throttle_snapshots_before throttle_snapshots_after
 
-  # Checks if any CSV output files match the the expected pattern before attempting to move them to the results directory.
+  # Checks if any CSV output files match the expected pattern before attempting to move them to the results directory.
   if compgen -G "${LOCUST_OUT_DIR}/results_${run_id}*" > /dev/null; then
     mv "${LOCUST_OUT_DIR}"/results_"${run_id}"* "${run_results_dir}/"
     mv "${LOCUST_OUT_DIR}/${run_id}"* "${LOG_DIR}/"
@@ -235,4 +237,27 @@ run_one_combination() {
   fi
 
   log "Data collection complete."
+}
+
+write_keylog() {
+  local run_results_dir="$1"
+
+  mkdir -p "${run_results_dir}/keylogs"
+  if [ -d "${LOCUST_OUT_DIR}/keylogs" ]; then
+    if sudo -n chown -R "$(id -u):$(id -g)" "${LOCUST_OUT_DIR}/keylogs" 2>/dev/null; then
+      log "Adjusted ownership on ${LOCUST_OUT_DIR}/keylogs before archiving."
+    else
+      log "WARNING: unable to adjust ownership on ${LOCUST_OUT_DIR}/keylogs; continuing with best-effort copy."
+    fi
+
+    if find "${LOCUST_OUT_DIR}/keylogs" -mindepth 1 -maxdepth 1 -print -quit | grep -q .; then
+      if mv "${LOCUST_OUT_DIR}/keylogs"/* "${run_results_dir}/keylogs/" 2>/dev/null; then
+        :
+      else
+        cp -a "${LOCUST_OUT_DIR}/keylogs"/. "${run_results_dir}/keylogs"/
+      fi
+    fi
+  fi
+
+  cat "${run_results_dir}/keylogs"/* 2>/dev/null > "${run_results_dir}/complete_keylog.log"
 }
