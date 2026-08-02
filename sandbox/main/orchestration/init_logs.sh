@@ -29,7 +29,7 @@ init_main_log() {
 }
 
 init_throttle_stats_csv() {
-  local out_file="${RESULTS_DIR}/throttle_stats.csv"
+  local out_file="${COLLECTION_DIR}/throttle_stats.csv"
   local header="run_id"
   local alias
   local metric

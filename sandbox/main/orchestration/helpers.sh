@@ -12,10 +12,10 @@ teardown() {
 # Unused function for analysis purposes, kept for reference and potential future use
 extract_pcap_metrics() {
   local run_id="$1"
-  local run_results_dir="$2"
+  local trial_dir="$2"
   local pcap_file="$3"
   local keylog="$4"
-  local out="${run_results_dir}/pcap_summary_${run_id}.csv"
+  local out="${trial_dir}/pcap_summary_${run_id}.csv"
 
   # TODO: Perform tshark metric extraction on host instead of inside router container
   docker compose exec -T router \

@@ -85,7 +85,7 @@ main() {
     done
   done
 
-  log "Matrix sweep complete. Results in ${RESULTS_DIR}/"
+  log "Matrix sweep complete."
   rm -f "${NGINX_CONF}"
 }
 

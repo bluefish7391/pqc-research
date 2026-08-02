@@ -76,7 +76,7 @@ record_throttle_stats_for_container() {
 
 write_throttle_stats() {
   local run_id="$1"
-  local out_file="${RESULTS_DIR}/throttle_stats.csv"
+  local out_file="${COLLECTION_DIR}/throttle_stats.csv"
   local throttle_capture_ok="$2"
   local -n before_snapshot_map="$3"
   local -n after_snapshot_map="$4"

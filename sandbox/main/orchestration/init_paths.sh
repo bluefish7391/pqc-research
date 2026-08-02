@@ -18,10 +18,11 @@ init_paths() {
 
   DATA_DIR="${PROJECT_DIR}/data"
   COLLECTION_DIR="${DATA_DIR}/$(resolve_collection_dir)"
-  
+
+  MAIN_LOG_FILE="${COLLECTION_DIR}/run_matrix.log"
   LOCUST_OUT_DIR="${PROJECT_DIR}/locust"
 
   # Create untracked output directories/files so fresh clones can run immediately.
   mkdir -p "${COLLECTION_DIR}"
-  touch "${COLLECTION_DIR}/run_matrix.log" "${COLLECTION_DIR}/run_info.txt"
+  touch "${MAIN_LOG_FILE}" "${COLLECTION_DIR}/run_info.txt"
 }

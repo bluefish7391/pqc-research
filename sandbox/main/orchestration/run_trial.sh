@@ -63,8 +63,8 @@ run_one_combination() {
   local trial_number="$7"
 
   local run_id="${kem_label}_u${users}_rtt${rtt_ms}ms_loss${loss_pct}pct_rep${repetition}"
-  local run_results_dir="${RESULTS_DIR}/${run_id}"
-  mkdir -p "${run_results_dir}"
+  local trial_dir="${COLLECTION_DIR}/${run_id}"
+  mkdir -p "${trial_dir}"
 
   log "════════════════════════════════════════════════════════════"
   log "RUN(${trial_number}/${total_trials}): kem=${kem_label} (${kem_value})  users=${users}  rtt=${rtt_ms}ms  loss=${loss_pct}% repetition=${repetition}"
@@ -79,7 +79,7 @@ run_one_combination() {
   # Start tshark in the background to capture packets on eth0, filtering for traffic to/from the oqs-nginx container on port 4433.
   # Write the captured packets to a pcap file named after the run_id in the PCAP_DIR.
   # Start tshark and capture stderr so we can detect readiness text.
-  tshark_log="${run_results_dir}/tshark_${run_id}.log"
+  tshark_log="${trial_dir}/tshark_${run_id}.log"
   local pcap_path="/mnt/pcaps/${run_id}.pcap"
   NGINX_IFACE=$(docker compose exec -T -u root router \
     sh -c "ip -o addr show | awk '/172\\.20\\.0\\.2/{print \$2}'" \
@@ -112,8 +112,8 @@ run_one_combination() {
     elapsed=$((elapsed + 1))
   done
 
-  local locust_cpu_log_file="${run_results_dir}/locust_cpu_matrix_${run_id}.csv"
-  local nginx_cpu_log_file="${run_results_dir}/nginx_cpu_matrix_${run_id}.csv"
+  local locust_cpu_log_file="${trial_dir}/locust_cpu_matrix_${run_id}.csv"
+  local nginx_cpu_log_file="${trial_dir}/nginx_cpu_matrix_${run_id}.csv"
   echo "Timestamp,CPU_Pct,Mem_Usage,Net_IO_Rx_Tx" > "${locust_cpu_log_file}"
   echo "Timestamp,CPU_Pct,Mem_Usage,Net_IO_Rx_Tx" > "${nginx_cpu_log_file}"
 
@@ -176,7 +176,7 @@ run_one_combination() {
 
   if [ "${throttle_capture_ok}" -eq 1 ]; then
     log "Starting headless Locust run..."
-    local locust_log_file="${LOG_DIR}/locust_${run_id}.log"
+    local locust_log_file="${trial_dir}/locust_${run_id}.log"
     local locust_rc=0
 
     log "Starting headless Locust run..."
@@ -224,14 +224,14 @@ run_one_combination() {
   docker compose exec -T -u root router pkill -SIGINT tshark 2>/dev/null || true
   wait $TSHARK_PID 2>/dev/null || true
 
-  write_keylog "${run_results_dir}"  # Combine all keylog files into one for easier analysis.
-  extract_pcap_metrics "${run_id}" "${run_results_dir}" "/mnt/pcaps/${run_id}.pcap" "/mnt/keylogs/${run_id}_combined.log"
+  write_keylog "${trial_dir}"  # Combine all keylog files into one for easier analysis.
+  extract_pcap_metrics "${run_id}" "${trial_dir}" "/mnt/pcaps/${run_id}.pcap" "/mnt/keylogs/${run_id}_combined.log"
   write_throttle_stats "${run_id}" throttle_capture_ok throttle_snapshots_before throttle_snapshots_after
 
   # Checks if any CSV output files match the expected pattern before attempting to move them to the results directory.
   if compgen -G "${LOCUST_OUT_DIR}/results_${run_id}*" > /dev/null; then
-    mv "${LOCUST_OUT_DIR}"/results_"${run_id}"* "${run_results_dir}/"
-    mv "${LOCUST_OUT_DIR}/${run_id}"* "${LOG_DIR}/"
+    mv "${LOCUST_OUT_DIR}"/results_"${run_id}"* "${trial_dir}/"
+    mv "${LOCUST_OUT_DIR}/${run_id}"* "${trial_dir}/"
   else
     log "WARNING: no CSV output found for ${run_id} — check locust container logs."
   fi
@@ -240,9 +240,9 @@ run_one_combination() {
 }
 
 write_keylog() {
-  local run_results_dir="$1"
+  local trial_dir="$1"
 
-  mkdir -p "${run_results_dir}/keylogs"
+  mkdir -p "${trial_dir}/keylogs"
   if [ -d "${LOCUST_OUT_DIR}/keylogs" ]; then
     if sudo -n chown -R "$(id -u):$(id -g)" "${LOCUST_OUT_DIR}/keylogs" 2>/dev/null; then
       log "Adjusted ownership on ${LOCUST_OUT_DIR}/keylogs before archiving."
@@ -251,13 +251,13 @@ write_keylog() {
     fi
 
     if find "${LOCUST_OUT_DIR}/keylogs" -mindepth 1 -maxdepth 1 -print -quit | grep -q .; then
-      if mv "${LOCUST_OUT_DIR}/keylogs"/* "${run_results_dir}/keylogs/" 2>/dev/null; then
+      if mv "${LOCUST_OUT_DIR}/keylogs"/* "${trial_dir}/keylogs/" 2>/dev/null; then
         :
       else
-        cp -a "${LOCUST_OUT_DIR}/keylogs"/. "${run_results_dir}/keylogs"/
+        cp -a "${LOCUST_OUT_DIR}/keylogs"/. "${trial_dir}/keylogs"/
       fi
     fi
   fi
 
-  cat "${run_results_dir}/keylogs"/* 2>/dev/null > "${run_results_dir}/complete_keylog.log"
+  cat "${trial_dir}/keylogs"/* 2>/dev/null > "${trial_dir}/complete_keylog.log"
 }
