@@ -56,7 +56,7 @@ services:
         ipv4_address: 172.21.0.2
     volumes:
       - ./router/entrypoint.sh:/entrypoint.sh:ro
-      - ${PCAP_DIR:-./data/pcaps}:/mnt/pcaps:rw   # default path for interactive terminal compose commands when PCAP_DIR is unset
+      - ${COLLECTION_DIR:-./data}:/mnt/collection:rw   # default path for interactive terminal compose commands when COLLECTION_DIR is unset
     entrypoint: ["/entrypoint.sh"]
     cap_add:
       - NET_ADMIN
@@ -92,7 +92,8 @@ services:
     ports:
       - "8089:8089"                  # Unused in headless sweeps; left open for manual debugging
     volumes:
-      - ./locust:/mnt/locust         # read-write: headless runs write --csv output here
+      - ${COLLECTION_DIR:-./data}:/mnt/collection:rw
+      - ./locust:/mnt/locust
       - ./certs:/certs:ro            # Available for optional CA pinning
     extra_hosts:
       - "oqs-nginx:172.20.0.10"
