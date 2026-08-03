@@ -112,8 +112,11 @@ run_one_combination() {
     elapsed=$((elapsed + 1))
   done
 
-  local locust_cpu_log_file="${trial_dir}/locust_cpu_matrix_${run_id}.csv"
-  local nginx_cpu_log_file="${trial_dir}/nginx_cpu_matrix_${run_id}.csv"
+  local container_stats_dir="${trial_dir}/container_stats"
+  mkdir -p "${container_stats_dir}"
+
+  local locust_cpu_log_file="${container_stats_dir}/locust_cpu_matrix_${run_id}.csv"
+  local nginx_cpu_log_file="${container_stats_dir}/nginx_cpu_matrix_${run_id}.csv"
   echo "Timestamp,CPU_Pct,Mem_Usage,Net_IO_Rx_Tx" > "${locust_cpu_log_file}"
   echo "Timestamp,CPU_Pct,Mem_Usage,Net_IO_Rx_Tx" > "${nginx_cpu_log_file}"
 
