@@ -30,58 +30,62 @@ resume_parse_args "$@" # Parses command-line arguments to determine if the scrip
 init_paths
 
 main() {
+  cd "${PROJECT_DIR}"
+
+  local total_combinations=$(( ${#KEM_GROUPS[@]} * ${#USER_LEVELS[@]} * ${#NETWORK_CONDITIONS[@]} ))
+  local total_trials=$(( total_combinations * REPETITIONS_PER_TEST ))
+
+  local trial_start=1
+  local trial_end=${total_trials}
+
   if (( RESUME_MODE == 1 )); then
+    trial_start="${RESUME_TRIAL_START}"
+    trial_end="${RESUME_TRIAL_END}"
+
     log "════════════════════════════════════════════════════════════"
     log "Resuming interrupted sweep in ${COLLECTION_DIR}."
-    log "Resume window: trials ${RESUME_TRIAL_START}-${RESUME_TRIAL_END}."
+    log "Resume window: trials ${trial_start}-${trial_end}."
     log "════════════════════════════════════════════════════════════"
   else
     init_logs
   fi
 
-  cd "${PROJECT_DIR}"
-
-  local total_combinations=$(( ${#KEM_GROUPS[@]} * ${#USER_LEVELS[@]} * ${#RTTS[@]} * ${#LOSS_LEVELS[@]} ))
-  local total_trials=$(( total_combinations * REPETITIONS_PER_TEST ))
-
-  if ! resume_compute_skip_window "${total_trials}"; then
-    log "ERROR: Failed to compute resume trial window."
-    return 1
-  fi
-
-  local TRIALS_TO_SKIP_AT_START="${RESUME_TRIALS_TO_SKIP_AT_START}" # Derived from resume start trial when resuming an interrupted sweep.
-  local TRIALS_TO_SKIP_AT_END="${RESUME_TRIALS_TO_SKIP_AT_END}" # Derived from resume end trial when resuming an interrupted sweep.
-
   # Ensure a clean slate before the sweep starts.
   teardown
 
-  local total_trials_performed=0
+  local current_trial_number=1
 
   for kem_label in "${sorted_kem_labels[@]}"; do
-    kem_value="${KEM_GROUPS[${kem_label}]}"
+    local kem_value="${KEM_GROUPS[${kem_label}]}"
 
-    for users in "${USER_LEVELS[@]}"; do
-      for rtt in "${RTTS[@]}"; do
-        for loss in "${LOSS_LEVELS[@]}"; do
-          for ((rep=1; rep<=REPETITIONS_PER_TEST; rep++)); do
-            if (( total_trials_performed >= TRIALS_TO_SKIP_AT_START && total_trials_performed < total_trials - TRIALS_TO_SKIP_AT_END )); then
-              start_up_containers "${kem_label}" "${kem_value}"
-              run_one_combination "${kem_label}" "${kem_value}" "${users}" "${rtt}" "${loss}" "${rep}" "$((total_trials_performed + 1))"
-              teardown
-            fi
+    for network_label in "${sorted_network_labels[@]}"; do
+      local network_condition="${NETWORK_CONDITIONS[${network_label}]}" # in the form of "rtt=10ms loss=0%"
+      
+      # Regex to capture digits after rtt= and loss=
+      if [[ $network_condition =~ rtt=([0-9]+)ms[[:space:]]+loss=([0-9]+)% ]]; then
+        local rtt="${BASH_REMATCH[1]}"
+        local loss="${BASH_REMATCH[2]}"
+      else
+        log "ERROR: Failed to parse network condition for ${network_label} (${network_condition})."
+        exit 1
+      fi
 
-            (( total_trials_performed += 1 ))
-          done
+      for users in "${USER_LEVELS[@]}"; do
+        for ((rep=1; rep<=REPETITIONS_PER_TEST; rep++)); do
+          if (( current_trial_number >= trial_start && current_trial_number <= trial_end )); then
+            start_up_containers "${kem_label}" "${kem_value}"
+            run_one_combination "${kem_label}" "${kem_value}" "${users}" "${rtt}" "${loss}" "${rep}" "$((current_trial_number))"
+            teardown
+          fi
+
+          (( current_trial_number += 1 ))
         done
       done
+      
     done
-
-    # teardown
-
   done
 
-  log "Matrix sweep complete. Results in ${RESULTS_DIR}/"
-
+  log "Matrix sweep complete."
   rm -f "${NGINX_CONF}"
 }
 

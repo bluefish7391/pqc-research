@@ -56,7 +56,7 @@ services:
         ipv4_address: 172.21.0.2
     volumes:
       - ./router/entrypoint.sh:/entrypoint.sh:ro
-      - ${PCAP_DIR:-./data/pcaps}:/mnt/pcaps:rw   # default path for interactive terminal compose commands when PCAP_DIR is unset
+      - ${COLLECTION_DIR:-./data}:/mnt/collection:rw   # default path for interactive terminal compose commands when COLLECTION_DIR is unset
     entrypoint: ["/entrypoint.sh"]
     cap_add:
       - NET_ADMIN
@@ -69,6 +69,12 @@ services:
       timeout:      2s
       retries:      3
       start_period: 3s
+    cpuset: "5"
+    deploy:
+      resources:
+        limits:
+          cpus:   "1.0"
+          memory: 256M
     restart: on-failure
 
   # ── OQS-Locust: KD-protocol-aware load tester ────────────────────────
@@ -86,7 +92,8 @@ services:
     ports:
       - "8089:8089"                  # Unused in headless sweeps; left open for manual debugging
     volumes:
-      - ./locust:/mnt/locust         # read-write: headless runs write --csv output here
+      - ${COLLECTION_DIR:-./data}:/mnt/collection:rw
+      - ./locust:/mnt/locust
       - ./certs:/certs:ro            # Available for optional CA pinning
     extra_hosts:
       - "oqs-nginx:172.20.0.10"
@@ -104,10 +111,10 @@ services:
         condition: service_healthy
       router:
         condition: service_healthy
-    cpuset: "1,2"
+    cpuset: "1,2,3,4"
     deploy:
       resources:
         limits:
-          cpus:   "2.0"
+          cpus:   "4.0"
           memory: 512M
     restart: on-failure

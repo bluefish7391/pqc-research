@@ -1,5 +1,14 @@
 #!/usr/bin/env bash
 
+resolve_collection_dir() {
+  if (( RESUME_MODE == 1 )); then
+    validate_resume_collection_dir
+    echo "${RESUME_COLLECTION_NAME}"
+  else
+    echo "collection_$(date +%Y%m%d_%H%M%S)"
+  fi
+}
+
 init_paths() {
   # Resolve project paths and collection targets before the sweep starts.
   PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -8,17 +17,14 @@ init_paths() {
   NGINX_CONF="${PROJECT_DIR}/nginx/nginx.conf"
 
   DATA_DIR="${PROJECT_DIR}/data"
-  resume_resolve_collection_dir "${DATA_DIR}" "pre-pilot"
-  COLLECTION_DIR="${RESUME_COLLECTION_DIR}"
 
-  RESULTS_DIR="${COLLECTION_DIR}/results"
-  export PCAP_DIR="${COLLECTION_DIR}/pcaps"
+  COLLECTION_NAME="$(resolve_collection_dir)"
+  export COLLECTION_DIR="${DATA_DIR}/${COLLECTION_NAME}"
 
-  LOG_DIR="${COLLECTION_DIR}/logs"
-  MAIN_LOG_FILE="${LOG_DIR}/run_matrix.log"
+  MAIN_LOG_FILE="${COLLECTION_DIR}/run_matrix.log"
   LOCUST_OUT_DIR="${PROJECT_DIR}/locust"
 
   # Create untracked output directories/files so fresh clones can run immediately.
-  mkdir -p "${COLLECTION_DIR}" "${RESULTS_DIR}" "${PCAP_DIR}" "${LOG_DIR}"
+  mkdir -p "${COLLECTION_DIR}"
   touch "${MAIN_LOG_FILE}" "${COLLECTION_DIR}/run_info.txt"
 }

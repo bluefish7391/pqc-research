@@ -8,7 +8,7 @@ import io
 import gevent
 from gevent import util as gevent_util
 from locust import User, task, constant, events
-from locust.runners import MasterRunner, WorkerRunner
+from locust.runners import MasterRunner, WorkerRunner # type: ignore
 import csv
 
 # Configuration and global variables
@@ -17,13 +17,23 @@ TARGET_HOST = os.getenv("TARGET_HOST", "oqs-nginx")
 TARGET_PORT = os.getenv("TARGET_PORT", "4433")
 TARGET_HANDSHAKES = int(os.getenv("TARGET_HANDSHAKES", "1000"))
 RUN_ID = os.getenv("RUN_ID", "").strip()
+MAIN_OUTPUT_DIR = os.getenv("MAIN_OUTPUT_DIR", f"/mnt/collection/{RUN_ID}/locust")
+TRIAL_DIR = f"/mnt/collection/{RUN_ID}"
 WAIT_TIME   = 0.0
 OPENSSL_BIN = "/opt/oqssa/bin/openssl"
 
+# Force timezone to New York time
+os.environ["TZ"] = "EST5EDT,M3.2.0/2,M11.1.0/2"
+if hasattr(time, "tzset"):
+    time.tzset()
+
 WORKER_ID = uuid.uuid1();
 
+KEYLOG_DIR = f"{TRIAL_DIR}/keylogs"
+os.makedirs(KEYLOG_DIR, exist_ok=True)
+
 # Open once per Locust worker process, at import time
-csv_path = f"/mnt/locust/results_{RUN_ID}_p{WORKER_ID}_requests.csv"
+csv_path = f"{MAIN_OUTPUT_DIR}/requests.csv"
 _csv_file = open(csv_path, "w", newline="")
 _csv_writer = csv.writer(_csv_file)
 _csv_writer.writerow(["request_id", "greenlet_id", "start_time_ns", "response_time_ms", "response_length", "success", "exception"])
@@ -45,8 +55,8 @@ def log_request_to_csv(request_type, name, response_time, response_length, excep
 log = logging.getLogger("oqs-tls")
 log.setLevel(logging.INFO)
 
-log_file_name = f"{RUN_ID}_p{WORKER_ID}_locust_debug.log" if RUN_ID else f"locust_debug_p{WORKER_ID}.log"
-file_handler = logging.FileHandler(f"/mnt/locust/{log_file_name}", mode="a")
+log_file_name = f"worker_{WORKER_ID}_requests.log" if RUN_ID else f"worker_{WORKER_ID}_requests.log"
+file_handler = logging.FileHandler(f"{MAIN_OUTPUT_DIR}/{log_file_name}", mode="a")
 file_handler.setFormatter(logging.Formatter("%(message)s"))
 log.addHandler(file_handler)
 log.propagate = False  # avoid duplicate lines also going to Locust's console handler
@@ -139,6 +149,8 @@ class TLSHandshakeUser(User):
 
     def on_start(self):
         self.greenlet_id = id(gevent.getcurrent())
+        self.keylog_path = f"{KEYLOG_DIR}/user_{uuid.uuid1()}.log"
+        open(self.keylog_path, "a").close()
 
     @task
     def _fire_request(self):
@@ -162,20 +174,27 @@ class TLSHandshakeUser(User):
 
             start_time=time.time_ns()
 
+            env = os.environ.copy()
+            env["SSLKEYLOGFILE"] = self.keylog_path
+
+            s_client_cmd = [
+                OPENSSL_BIN, "s_client",
+                "-connect", f"{TARGET_HOST}:{TARGET_PORT}",
+                "-groups", KEM_GROUP,
+                "-no_ticket", # Disable session tickets to ensure a full handshake is performed.
+                "-quiet", # Suppress unnecessary output, only the HTTP response will be captured.
+                "-nocommands", # Suppress interactive commands, HTTP request will be sent via stdin.
+                "-keylogfile", self.keylog_path,
+            ]
+
             log.info(f"Request start: greenlet_id={self.greenlet_id}, request_id={request_id}, start_time={start_time}, completed_handshakes={completed_handshakes}")
             result = subprocess.run(
                 # Array of command-line arguments for the OpenSSL s_client command.
-                [
-                    OPENSSL_BIN, "s_client",
-                    "-connect", f"{TARGET_HOST}:{TARGET_PORT}",
-                    "-groups", KEM_GROUP,
-                    "-no_ticket", # Disable session tickets to ensure a full handshake is performed.
-                    "-quiet", # Suppress unnecessary output, only the HTTP response will be captured.
-                    "-nocommands", # Suppress interactive commands, HTTP request will be sent via stdin.
-                ],
+                s_client_cmd,
                 input=HTTP_REQUEST,
                 capture_output=True, # Capture stdout and stderr for analysis.
                 timeout=10, # Set a timeout for the handshake operation to avoid hanging indefinitely. Measured in seconds.
+                env=env,
             )
             log.info(f"Request end: greenlet_id={self.greenlet_id}, request_id={request_id}, end_time={time.time_ns()}, completed_handshakes={completed_handshakes}")
 
