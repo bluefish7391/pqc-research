@@ -55,7 +55,7 @@ def log_request_to_csv(request_type, name, response_time, response_length, excep
 log = logging.getLogger("oqs-tls")
 log.setLevel(logging.INFO)
 
-log_file_name = f"worker{WORKER_ID}_requests.log" if RUN_ID else f"worker{WORKER_ID}_requests.log"
+log_file_name = f"worker_{WORKER_ID}_requests.log" if RUN_ID else f"worker_{WORKER_ID}_requests.log"
 file_handler = logging.FileHandler(f"{MAIN_OUTPUT_DIR}/{log_file_name}", mode="a")
 file_handler.setFormatter(logging.Formatter("%(message)s"))
 log.addHandler(file_handler)
@@ -149,7 +149,7 @@ class TLSHandshakeUser(User):
 
     def on_start(self):
         self.greenlet_id = id(gevent.getcurrent())
-        self.keylog_path = f"{KEYLOG_DIR}/{RUN_ID}_{uuid.uuid1()}.log"
+        self.keylog_path = f"{KEYLOG_DIR}/user_{uuid.uuid1()}.log"
         open(self.keylog_path, "a").close()
 
     @task
