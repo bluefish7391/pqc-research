@@ -177,15 +177,17 @@ run_one_combination() {
   if [ "${throttle_capture_ok}" -eq 1 ]; then
     log "Starting headless Locust run..."
     local locust_log_file="${trial_dir}/locust_log.log"
-    local locust_binded_trial_dir="/mnt/collection/${run_id}"
+    local locust_output_dir="/mnt/collection/${run_id}/locust"
     local locust_rc=0
+
+    mkdir "${trial_dir}/locust"
 
     log "Starting headless Locust run..."
     set +e
     docker compose exec -T \
       -e RUN_ID="${run_id}" \
       -e TARGET_HANDSHAKES="${TARGET_HANDSHAKES}" \
-      -e TRIAL_DIR="${locust_binded_trial_dir}" \
+      -e LOCUST_OUTPUT_DIR="${locust_output_dir}" \
       oqs-locust \
       locust \
         --locustfile /mnt/locust/locustfile.py \
@@ -196,7 +198,7 @@ run_one_combination() {
         --spawn-rate "${SPAWN_RATE}" \
         --run-time "${MAX_DURATION}" \
         --stop-timeout 5 \
-        --csv "${locust_binded_trial_dir}/locust" \
+        --csv "${locust_output_dir}/locust" \
         --processes "${LOCUST_PROCESSES}" \
       > >(tee -a "${locust_log_file}") \
       2> >(tee -a "${locust_log_file}" >&2)
