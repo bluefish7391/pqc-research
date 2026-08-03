@@ -55,7 +55,7 @@ def log_request_to_csv(request_type, name, response_time, response_length, excep
 log = logging.getLogger("oqs-tls")
 log.setLevel(logging.INFO)
 
-log_file_name = f"{RUN_ID}_w{WORKER_ID}_locust_debug.log" if RUN_ID else f"w{WORKER_ID}_locust_debug.log"
+log_file_name = f"worker{WORKER_ID}_requests.log" if RUN_ID else f"worker{WORKER_ID}_requests.log"
 file_handler = logging.FileHandler(f"{MAIN_OUTPUT_DIR}/{log_file_name}", mode="a")
 file_handler.setFormatter(logging.Formatter("%(message)s"))
 log.addHandler(file_handler)
