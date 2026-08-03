@@ -231,8 +231,6 @@ run_one_combination() {
   docker compose exec -T -u root router pkill -SIGINT tshark 2>/dev/null || true
   wait $TSHARK_PID 2>/dev/null || true
 
-  write_keylog "${trial_dir}"  # Combine all keylog files into one for easier analysis.
-  extract_pcap_metrics "${run_id}" "${trial_dir}" "${pcap_path}" "/mnt/keylogs/${run_id}_combined.log"
   write_throttle_stats "${run_id}" throttle_capture_ok throttle_snapshots_before throttle_snapshots_after
 
   log "Data collection complete."
