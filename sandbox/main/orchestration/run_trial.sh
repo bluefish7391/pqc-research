@@ -79,7 +79,7 @@ run_one_combination() {
   # Start tshark in the background to capture packets on eth0, filtering for traffic to/from the oqs-nginx container on port 4433.
   # Write the captured packets to a pcap file named after the run_id in the PCAP_DIR.
   # Start tshark and capture stderr so we can detect readiness text.
-  tshark_log="${trial_dir}/tshark_${run_id}.log"
+  tshark_log="${trial_dir}/tshark_log.log"
   local pcap_path="/mnt/collection/${run_id}/pcap.pcap"
   NGINX_IFACE=$(docker compose exec -T -u root router \
     sh -c "ip -o addr show | awk '/172\\.20\\.0\\.2/{print \$2}'" \
