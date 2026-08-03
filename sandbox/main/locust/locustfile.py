@@ -17,6 +17,7 @@ TARGET_HOST = os.getenv("TARGET_HOST", "oqs-nginx")
 TARGET_PORT = os.getenv("TARGET_PORT", "4433")
 TARGET_HANDSHAKES = int(os.getenv("TARGET_HANDSHAKES", "1000"))
 RUN_ID = os.getenv("RUN_ID", "").strip()
+TRIAL_DIR = os.getenv("TRIAL_DIR", "/mnt/collection")
 WAIT_TIME   = 0.0
 OPENSSL_BIN = "/opt/oqssa/bin/openssl"
 
@@ -27,11 +28,11 @@ if hasattr(time, "tzset"):
 
 WORKER_ID = uuid.uuid1();
 
-KEYLOG_DIR = "/mnt/locust/keylogs"
+KEYLOG_DIR = f"/mnt/{TRIAL_DIR}/keylogs"
 os.makedirs(KEYLOG_DIR, exist_ok=True)
 
 # Open once per Locust worker process, at import time
-csv_path = f"/mnt/locust/results_{RUN_ID}_p{WORKER_ID}_requests.csv"
+csv_path = f"{TRIAL_DIR}/requests.csv"
 _csv_file = open(csv_path, "w", newline="")
 _csv_writer = csv.writer(_csv_file)
 _csv_writer.writerow(["request_id", "greenlet_id", "start_time_ns", "response_time_ms", "response_length", "success", "exception"])
@@ -53,8 +54,8 @@ def log_request_to_csv(request_type, name, response_time, response_length, excep
 log = logging.getLogger("oqs-tls")
 log.setLevel(logging.INFO)
 
-log_file_name = f"{RUN_ID}_p{WORKER_ID}_locust_debug.log" if RUN_ID else f"locust_debug_p{WORKER_ID}.log"
-file_handler = logging.FileHandler(f"/mnt/locust/{log_file_name}", mode="a")
+log_file_name = f"{RUN_ID}_w{WORKER_ID}_locust_debug.log" if RUN_ID else f"w{WORKER_ID}_locust_debug.log"
+file_handler = logging.FileHandler(f"/mnt/{TRIAL_DIR}/{log_file_name}", mode="a")
 file_handler.setFormatter(logging.Formatter("%(message)s"))
 log.addHandler(file_handler)
 log.propagate = False  # avoid duplicate lines also going to Locust's console handler

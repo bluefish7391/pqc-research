@@ -17,7 +17,9 @@ init_paths() {
   NGINX_CONF="${PROJECT_DIR}/nginx/nginx.conf"
 
   DATA_DIR="${PROJECT_DIR}/data"
-  COLLECTION_DIR="${DATA_DIR}/$(resolve_collection_dir)"
+
+  COLLECTION_NAME="$(resolve_collection_dir)"
+  export COLLECTION_DIR="${DATA_DIR}/${COLLECTION_NAME}"
 
   MAIN_LOG_FILE="${COLLECTION_DIR}/run_matrix.log"
   LOCUST_OUT_DIR="${PROJECT_DIR}/locust"

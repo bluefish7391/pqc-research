@@ -80,14 +80,14 @@ run_one_combination() {
   # Write the captured packets to a pcap file named after the run_id in the PCAP_DIR.
   # Start tshark and capture stderr so we can detect readiness text.
   tshark_log="${trial_dir}/tshark_${run_id}.log"
-  local pcap_path="/mnt/pcaps/${run_id}.pcap"
+  local pcap_path="/mnt/collection/${run_id}/pcap.pcap"
   NGINX_IFACE=$(docker compose exec -T -u root router \
     sh -c "ip -o addr show | awk '/172\\.20\\.0\\.2/{print \$2}'" \
     | tr -d '\r')
 
   # tshark may drop privileges after startup; pre-create a writable output file.
   docker compose exec -T -u root router \
-    sh -c "mkdir -p /mnt/pcaps && : > '${pcap_path}' && chmod 666 '${pcap_path}'"
+    sh -c 'pcap_path="$1"; mkdir -p "$(dirname "$pcap_path")" && : > "$pcap_path" && chmod 666 "$pcap_path"' sh "${pcap_path}"
 
   docker compose exec -T -u root router \
     tshark -i "${NGINX_IFACE}" -f "host 172.20.0.10 and tcp port 4433" \
@@ -176,7 +176,8 @@ run_one_combination() {
 
   if [ "${throttle_capture_ok}" -eq 1 ]; then
     log "Starting headless Locust run..."
-    local locust_log_file="${trial_dir}/locust_${run_id}.log"
+    local locust_log_file="${trial_dir}/locust_log.log"
+    local locust_binded_trial_dir="/mnt/collection/${run_id}"
     local locust_rc=0
 
     log "Starting headless Locust run..."
@@ -184,6 +185,7 @@ run_one_combination() {
     docker compose exec -T \
       -e RUN_ID="${run_id}" \
       -e TARGET_HANDSHAKES="${TARGET_HANDSHAKES}" \
+      -e TRIAL_DIR="${locust_binded_trial_dir}" \
       oqs-locust \
       locust \
         --locustfile /mnt/locust/locustfile.py \
@@ -194,7 +196,7 @@ run_one_combination() {
         --spawn-rate "${SPAWN_RATE}" \
         --run-time "${MAX_DURATION}" \
         --stop-timeout 5 \
-        --csv "/mnt/locust/results_${run_id}" \
+        --csv "${locust_binded_trial_dir}/locust" \
         --processes "${LOCUST_PROCESSES}" \
       > >(tee -a "${locust_log_file}") \
       2> >(tee -a "${locust_log_file}" >&2)
@@ -225,16 +227,8 @@ run_one_combination() {
   wait $TSHARK_PID 2>/dev/null || true
 
   write_keylog "${trial_dir}"  # Combine all keylog files into one for easier analysis.
-  extract_pcap_metrics "${run_id}" "${trial_dir}" "/mnt/pcaps/${run_id}.pcap" "/mnt/keylogs/${run_id}_combined.log"
+  extract_pcap_metrics "${run_id}" "${trial_dir}" "${pcap_path}" "/mnt/keylogs/${run_id}_combined.log"
   write_throttle_stats "${run_id}" throttle_capture_ok throttle_snapshots_before throttle_snapshots_after
-
-  # Checks if any CSV output files match the expected pattern before attempting to move them to the results directory.
-  if compgen -G "${LOCUST_OUT_DIR}/results_${run_id}*" > /dev/null; then
-    mv "${LOCUST_OUT_DIR}"/results_"${run_id}"* "${trial_dir}/"
-    mv "${LOCUST_OUT_DIR}/${run_id}"* "${trial_dir}/"
-  else
-    log "WARNING: no CSV output found for ${run_id} — check locust container logs."
-  fi
 
   log "Data collection complete."
 }
