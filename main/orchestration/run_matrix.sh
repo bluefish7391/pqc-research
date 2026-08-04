@@ -90,8 +90,6 @@ main() {
     log "Resuming interrupted sweep in ${COLLECTION_DIR}."
     log "Resume window: trials ${trial_start}-${trial_end}."
     log "════════════════════════════════════════════════════════════"
-  else
-    init_logs
   fi
 
   # Ensure a clean slate before the sweep starts.
@@ -107,9 +105,10 @@ main() {
   done
 
   for ((i=1; i<=REPETITIONS_PER_TEST; i++)); do
-    SWEEP_DIR="sweep_${i}"
-    mkdir "${COLLECTION_DIR}/${SWEEP_DIR}"
-    
+    SWEEP_DIR="${COLLECTION_DIR}/sweep_${i}"
+    mkdir "${SWEEP_DIR}"
+    init_logs
+
     run_sweep all_cells ${i}
   done
 

@@ -1,5 +1,16 @@
 #!/usr/bin/env bash
 
+init_main_log() {
+    log "Starting matrix sweep."
+    log "KEM groups: ${!KEM_GROUPS[*]}"
+    log "User levels: ${USER_LEVELS[*]}"
+    log "RTTs (ms): ${RTTS[*]}"
+    log "Loss levels (%): ${LOSS_LEVELS[*]}"
+    log "Target handshakes per trial: ${TARGET_HANDSHAKES}"
+    log "Max duration per run: ${MAX_DURATION}"
+    log "Repetitions per test: ${REPETITIONS_PER_TEST}"
+}
+
 init_run_info() {
   local run_info_file_path="${SWEEP_DIR}/run_info.txt"
   touch "${run_info_file_path}"
@@ -18,17 +29,6 @@ Repetitions per test: ${REPETITIONS_PER_TEST}
 EOF
   } >> "${run_info_file_path}"
   fi
-}
-
-init_main_log() {
-    log "Starting matrix sweep."
-    log "KEM groups: ${!KEM_GROUPS[*]}"
-    log "User levels: ${USER_LEVELS[*]}"
-    log "RTTs (ms): ${RTTS[*]}"
-    log "Loss levels (%): ${LOSS_LEVELS[*]}"
-    log "Target handshakes per trial: ${TARGET_HANDSHAKES}"
-    log "Max duration per run: ${MAX_DURATION}"
-    log "Repetitions per test: ${REPETITIONS_PER_TEST}"
 }
 
 init_throttle_stats_csv() {
