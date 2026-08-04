@@ -19,13 +19,11 @@ init_paths() {
   DATA_DIR="${PROJECT_DIR}/data"
 
   COLLECTION_NAME="$(resolve_collection_dir)"
-  export COLLECTION_DIR="${DATA_DIR}/${COLLECTION_NAME}"
+  COLLECTION_DIR="${DATA_DIR}/${COLLECTION_NAME}"
+  MAIN_LOG_FILE="${COLLECTION_DIR}/run_matrix.log"
 
   SWEEP_NAME="sweep_1" # Updated on every sweep
   export SWEEP_DIR="${COLLECTION_DIR}/${SWEEP_NAME}"
-
-  MAIN_LOG_FILE="${COLLECTION_DIR}/run_matrix.log"
-  LOCUST_OUT_DIR="${PROJECT_DIR}/locust"
 
   # Create untracked output directories/files so fresh clones can run immediately.
   mkdir -p "${COLLECTION_DIR}"

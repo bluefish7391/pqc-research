@@ -239,26 +239,3 @@ run_one_combination() {
 
   log "Data collection complete."
 }
-
-write_keylog() {
-  local trial_dir="$1"
-
-  mkdir -p "${trial_dir}/keylogs"
-  if [ -d "${LOCUST_OUT_DIR}/keylogs" ]; then
-    if sudo -n chown -R "$(id -u):$(id -g)" "${LOCUST_OUT_DIR}/keylogs" 2>/dev/null; then
-      log "Adjusted ownership on ${LOCUST_OUT_DIR}/keylogs before archiving."
-    else
-      log "WARNING: unable to adjust ownership on ${LOCUST_OUT_DIR}/keylogs; continuing with best-effort copy."
-    fi
-
-    if find "${LOCUST_OUT_DIR}/keylogs" -mindepth 1 -maxdepth 1 -print -quit | grep -q .; then
-      if mv "${LOCUST_OUT_DIR}/keylogs"/* "${trial_dir}/keylogs/" 2>/dev/null; then
-        :
-      else
-        cp -a "${LOCUST_OUT_DIR}/keylogs"/. "${trial_dir}/keylogs"/
-      fi
-    fi
-  fi
-
-  cat "${trial_dir}/keylogs"/* 2>/dev/null > "${trial_dir}/complete_keylog.log"
-}
