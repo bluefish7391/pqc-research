@@ -31,11 +31,12 @@ init_paths
 
 run_sweep() {
   local -n cells="$1"
+  local sweep_num="$2"
 
   readarray -t shuffled_cells < <(printf "%s\n" "${cells[@]}" | shuf)
     
   log "================================================================="
-  log "Beginning sweep ${i} of ${REPETITIONS_PER_TEST}..."
+  log "Beginning sweep ${sweep_num} of ${REPETITIONS_PER_TEST}..."
   log "Shuffled cell order:"
   log $(cat < <(printf "%s, " "${shuffled_cells[@]}"))
   log "================================================================="
@@ -106,7 +107,8 @@ main() {
   done
 
   for ((i=1; i<=REPETITIONS_PER_TEST; i++)); do
-    run_sweep all_cells
+    SWEEP_DIR="sweep_${i}"
+    run_sweep all_cells ${i}
   done
 
   log "Matrix sweep complete."

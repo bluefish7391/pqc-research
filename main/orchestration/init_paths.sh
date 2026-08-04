@@ -21,6 +21,9 @@ init_paths() {
   COLLECTION_NAME="$(resolve_collection_dir)"
   export COLLECTION_DIR="${DATA_DIR}/${COLLECTION_NAME}"
 
+  SWEEP_NAME="sweep_1"
+  SWEEP_DIR="${COLLECTION_DIR}/${SWEEP_NAME}"
+
   MAIN_LOG_FILE="${COLLECTION_DIR}/run_matrix.log"
   LOCUST_OUT_DIR="${PROJECT_DIR}/locust"
 
