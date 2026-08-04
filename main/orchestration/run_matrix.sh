@@ -55,34 +55,36 @@ main() {
 
   local current_trial_number=1
 
-  for kem_label in "${sorted_kem_labels[@]}"; do
-    local kem_value="${KEM_GROUPS[${kem_label}]}"
+  for ((rep=1; rep<=REPETITIONS_PER_TEST; rep++)); do
+  
+    for kem_label in "${sorted_kem_labels[@]}"; do
+        local kem_value="${KEM_GROUPS[${kem_label}]}"
 
-    for network_label in "${sorted_network_labels[@]}"; do
-      local network_condition="${NETWORK_CONDITIONS[${network_label}]}" # in the form of "rtt=10ms loss=0%"
-      
-      # Regex to capture digits after rtt= and loss=
-      if [[ $network_condition =~ rtt=([0-9]+)ms[[:space:]]+loss=([0-9]+)% ]]; then
-        local rtt="${BASH_REMATCH[1]}"
-        local loss="${BASH_REMATCH[2]}"
-      else
-        log "ERROR: Failed to parse network condition for ${network_label} (${network_condition})."
-        exit 1
-      fi
-
-      for users in "${USER_LEVELS[@]}"; do
-        for ((rep=1; rep<=REPETITIONS_PER_TEST; rep++)); do
-          if (( current_trial_number >= trial_start && current_trial_number <= trial_end )); then
-            start_up_containers "${kem_label}" "${kem_value}"
-            run_one_combination "${kem_label}" "${kem_value}" "${users}" "${rtt}" "${loss}" "${rep}" "$((current_trial_number))"
-            teardown
+        for network_label in "${sorted_network_labels[@]}"; do
+          local network_condition="${NETWORK_CONDITIONS[${network_label}]}" # in the form of "rtt=10ms loss=0%"
+          
+          # Regex to capture digits after rtt= and loss=
+          if [[ $network_condition =~ rtt=([0-9]+)ms[[:space:]]+loss=([0-9]+)% ]]; then
+            local rtt="${BASH_REMATCH[1]}"
+            local loss="${BASH_REMATCH[2]}"
+          else
+            log "ERROR: Failed to parse network condition for ${network_label} (${network_condition})."
+            exit 1
           fi
 
-          (( current_trial_number += 1 ))
+          for users in "${USER_LEVELS[@]}"; do
+              if (( current_trial_number >= trial_start && current_trial_number <= trial_end )); then
+                start_up_containers "${kem_label}" "${kem_value}"
+                run_one_combination "${kem_label}" "${kem_value}" "${users}" "${rtt}" "${loss}" "${rep}" "$((current_trial_number))"
+                teardown
+              fi
+
+              (( current_trial_number += 1 ))
+          done
+          
         done
       done
-      
-    done
+
   done
 
   log "Matrix sweep complete."
