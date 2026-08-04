@@ -35,14 +35,14 @@ csv_path = None
 _csv_file = None
 _csv_writer = None
 
-
 def _setup_process_outputs(process_label):
     global WORKER_ID, csv_path, _csv_file, _csv_writer
 
     os.makedirs(MAIN_OUTPUT_DIR, exist_ok=True)
     WORKER_ID = process_label
-
-    csv_path = f"{MAIN_OUTPUT_DIR}/results_{WORKER_ID}_requests.csv"
+    
+    os.makedirs(f"{MAIN_OUTPUT_DIR}/requests", exist_ok=True)
+    csv_path = f"{MAIN_OUTPUT_DIR}/requests/worker_{WORKER_ID}_requests.csv"
     _csv_file = open(csv_path, "w", newline="")
     _csv_writer = csv.writer(_csv_file)
     _csv_writer.writerow(["request_id", "greenlet_id", "start_time_ns", "end_time_ns", "response_time_ms", "response_length", "success", "exception"])
