@@ -116,8 +116,10 @@ run_one_combination() {
   mkdir -p "${container_stats_dir}"
 
   local locust_cpu_log_file="${container_stats_dir}/locust_cpu_matrix_${run_id}.csv"
+  local router_cpu_log_file="${container_stats_dir}/router_cpu_matrix_${run_id}.csv"
   local nginx_cpu_log_file="${container_stats_dir}/nginx_cpu_matrix_${run_id}.csv"
   echo "Timestamp,CPU_Pct,Mem_Usage,Net_IO_Rx_Tx" > "${locust_cpu_log_file}"
+  echo "Timestamp,CPU_Pct,Mem_Usage,Net_IO_Rx_Tx" > "${router_cpu_log_file}"
   echo "Timestamp,CPU_Pct,Mem_Usage,Net_IO_Rx_Tx" > "${nginx_cpu_log_file}"
 
   log "Spawning background monitor (waiting for locust to spin up)..."
@@ -142,13 +144,15 @@ run_one_combination() {
     while true; do
       current_time=$(date +%s%N)
 
-      docker stats --no-stream --format '{{.Name}},{{.CPUPerc}},{{.MemUsage}},{{.NetIO}}' oqs-locust oqs-nginx 2>/dev/null \
+      docker stats --no-stream --format '{{.Name}},{{.CPUPerc}},{{.MemUsage}},{{.NetIO}}' oqs-locust oqs-nginx router 2>/dev/null \
         | while IFS=',' read -r c_name cpu_perc mem_schema net_io; do
             if [ -n "$c_name" ] && [ -n "$cpu_perc" ] && [ -n "$mem_schema" ]; then
               if [ "$c_name" = "oqs-locust" ]; then
                 echo "${current_time},${cpu_perc},${mem_schema},${net_io}" >> "${locust_cpu_log_file}"
               elif [ "$c_name" = "oqs-nginx" ]; then
                 echo "${current_time},${cpu_perc},${mem_schema},${net_io}" >> "${nginx_cpu_log_file}"
+              elif [ "$c_name" = "router" ]; then
+                echo "${current_time},${cpu_perc},${mem_schema},${net_io}" >> "${router_cpu_log_file}"
               fi
             fi
           done
