@@ -10,7 +10,7 @@ resolve_collection_dir() {
 }
 
 init_paths() {
-  # Resolve project paths and collection targets before the sweep starts.
+  # Resolve project paths and collection targets before the collection starts. Runs once per collection.
   PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
   NGINX_TMPL="${PROJECT_DIR}/nginx/nginx.conf.tmpl"
@@ -21,8 +21,8 @@ init_paths() {
   COLLECTION_NAME="$(resolve_collection_dir)"
   export COLLECTION_DIR="${DATA_DIR}/${COLLECTION_NAME}"
 
-  SWEEP_NAME="sweep_1"
-  SWEEP_DIR="${COLLECTION_DIR}/${SWEEP_NAME}"
+  SWEEP_NAME="sweep_1" # Updated on every sweep
+  export SWEEP_DIR="${COLLECTION_DIR}/${SWEEP_NAME}"
 
   MAIN_LOG_FILE="${COLLECTION_DIR}/run_matrix.log"
   LOCUST_OUT_DIR="${PROJECT_DIR}/locust"

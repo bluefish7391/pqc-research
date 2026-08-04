@@ -1,9 +1,12 @@
 #!/usr/bin/env bash
 
 init_run_info() {
-    if (( RESUME_MODE == 0 )); then
-    {
-        cat << EOF
+  local run_info_file_path="${SWEEP_DIR}/run_info.txt"
+  touch "${run_info_file_path}"
+
+  if (( RESUME_MODE == 0 )); then
+  {
+      cat << EOF
 Run info for matrix sweep started at $(date '+%Y-%m-%d %H:%M:%S')
 KEM groups: ${!KEM_GROUPS[*]}
 User levels: ${USER_LEVELS[*]}
@@ -13,8 +16,8 @@ Target handshakes per trial: ${TARGET_HANDSHAKES}
 Max duration per run: ${MAX_DURATION}
 Repetitions per test: ${REPETITIONS_PER_TEST}
 EOF
-    } >> "${COLLECTION_DIR}/run_info.txt"
-    fi
+  } >> "${run_info_file_path}"
+  fi
 }
 
 init_main_log() {
@@ -29,7 +32,7 @@ init_main_log() {
 }
 
 init_throttle_stats_csv() {
-  local out_file="${COLLECTION_DIR}/throttle_stats.csv"
+  local out_file="${SWEEP_DIR}/throttle_stats.csv"
   local header="run_id"
   local alias
   local metric

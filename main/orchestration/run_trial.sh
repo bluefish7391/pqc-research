@@ -63,7 +63,7 @@ run_one_combination() {
   local trial_number="$7"
 
   local run_id="${kem_label}_u${users}_rtt${rtt_ms}ms_loss${loss_pct}pct_rep${repetition}"
-  local trial_dir="${COLLECTION_DIR}/${run_id}"
+  local trial_dir="${SWEEP_DIR}/${run_id}"
   mkdir -p "${trial_dir}"
 
   log "════════════════════════════════════════════════════════════"

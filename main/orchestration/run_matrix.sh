@@ -108,6 +108,8 @@ main() {
 
   for ((i=1; i<=REPETITIONS_PER_TEST; i++)); do
     SWEEP_DIR="sweep_${i}"
+    mkdir "${COLLECTION_DIR}/${SWEEP_DIR}"
+    
     run_sweep all_cells ${i}
   done
 
