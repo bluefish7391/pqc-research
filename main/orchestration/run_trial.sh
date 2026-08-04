@@ -183,7 +183,7 @@ run_one_combination() {
 
   if [ "${throttle_capture_ok}" -eq 1 ]; then
     log "Starting headless Locust run..."
-    local locust_log_file="${trial_dir}/locust_main.log"
+    local locust_log_file="${trial_dir}/locust_log.log"
     local main_locust_output_dir="/mnt/collection/${run_id}/locust"
     local locust_rc=0
 
