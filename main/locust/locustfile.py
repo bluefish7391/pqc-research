@@ -27,23 +27,35 @@ os.environ["TZ"] = "EST5EDT,M3.2.0/2,M11.1.0/2"
 if hasattr(time, "tzset"):
     time.tzset()
 
-WORKER_ID = uuid.uuid1();
-
 KEYLOG_DIR = f"{TRIAL_DIR}/keylogs"
 os.makedirs(KEYLOG_DIR, exist_ok=True)
 
-# Open once per Locust worker process, at import time
-csv_path = f"{MAIN_OUTPUT_DIR}/requests.csv"
-_csv_file = open(csv_path, "w", newline="")
-_csv_writer = csv.writer(_csv_file)
-_csv_writer.writerow(["request_id", "greenlet_id", "start_time_ns", "response_time_ms", "response_length", "success", "exception"])
+WORKER_ID = None
+csv_path = None
+_csv_file = None
+_csv_writer = None
+
+def _setup_process_outputs(process_label):
+    global WORKER_ID, csv_path, _csv_file, _csv_writer
+
+    os.makedirs(MAIN_OUTPUT_DIR, exist_ok=True)
+    WORKER_ID = process_label
+    
+    os.makedirs(f"{MAIN_OUTPUT_DIR}/requests", exist_ok=True)
+    csv_path = f"{MAIN_OUTPUT_DIR}/requests/worker_{WORKER_ID}_requests.csv"
+    _csv_file = open(csv_path, "w", newline="")
+    _csv_writer = csv.writer(_csv_file)
+    _csv_writer.writerow(["request_id", "greenlet_id", "start_time_ns", "end_time_ns", "response_time_ms", "response_length", "success", "exception"])
 
 @events.request.add_listener
 def log_request_to_csv(request_type, name, response_time, response_length, exception, context, **kwargs):
+    if _csv_writer is None:
+        return
     _csv_writer.writerow([
         context.get("request_id"),
         context.get("greenlet_id"),
         context.get("start_time_ns"),
+        context.get("end_time_ns"),
         response_time,
         response_length,
         exception is not None,
@@ -54,11 +66,6 @@ def log_request_to_csv(request_type, name, response_time, response_length, excep
 # Logging setup
 log = logging.getLogger("oqs-tls")
 log.setLevel(logging.INFO)
-
-log_file_name = f"worker_{WORKER_ID}_requests.log" if RUN_ID else f"worker_{WORKER_ID}_requests.log"
-file_handler = logging.FileHandler(f"{MAIN_OUTPUT_DIR}/{log_file_name}", mode="a")
-file_handler.setFormatter(logging.Formatter("%(message)s"))
-log.addHandler(file_handler)
 log.propagate = False  # avoid duplicate lines also going to Locust's console handler
 
 # Create the HTTP request to be sent after the TLS handshake, identical for all users, 
@@ -121,11 +128,13 @@ def on_locust_init(environment, **kwargs):
         log.info("Master: registered 'handshake_done' message handler for cross-worker stop condition.")
 
     elif isinstance(environment.runner, WorkerRunner):
+        _setup_process_outputs(getattr(environment.runner, "client_id", f"pid_{os.getpid()}"))
         # Nothing to register on workers — they only ever send "handshake_done"
         # messages, from inside _fire_request below, once per completed request.
         log.info("Worker: will report completed handshakes to master via 'handshake_done' messages.")
 
     else:
+        _setup_process_outputs(f"local_{os.getpid()}")
         # "local" mode: single process, no master/worker split, so the original
         # local-counting/local-quit logic (see _check_stop_condition_local below)
         # is used directly instead of message passing.
@@ -211,7 +220,7 @@ class TLSHandshakeUser(User):
                     response_time   = elapsed_ms,
                     response_length = len(stdout),
                     exception       = None,
-                    context         = {"request_id": request_id, "greenlet_id": self.greenlet_id, "start_time_ns": start_time},
+                    context         = {"request_id": request_id, "greenlet_id": self.greenlet_id, "start_time_ns": start_time, "end_time_ns": time.time_ns()},
                 )
             else:
                 stderr = result.stderr.decode("ascii", errors="replace").strip()
@@ -227,7 +236,7 @@ class TLSHandshakeUser(User):
                 response_time   = elapsed_ms,
                 response_length = 0,
                 exception       = Exception("Timeout"),
-                context         = {"request_id": request_id, "greenlet_id": self.greenlet_id, "start_time_ns": start_time},
+                context         = {"request_id": request_id, "greenlet_id": self.greenlet_id, "start_time_ns": start_time, "end_time_ns": time.time_ns()},
             )
 
         # Handle any other exceptions that may occur during the handshake process, such as network errors or unexpected output.
@@ -239,7 +248,7 @@ class TLSHandshakeUser(User):
                 response_time   = elapsed_ms,
                 response_length = 0,
                 exception       = e,
-                context         = {"request_id": request_id, "greenlet_id": self.greenlet_id, "start_time_ns": start_time},
+                context         = {"request_id": request_id, "greenlet_id": self.greenlet_id, "start_time_ns": start_time, "end_time_ns": time.time_ns()},
             )
 
         finally:
