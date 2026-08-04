@@ -53,37 +53,57 @@ main() {
   # Ensure a clean slate before the sweep starts.
   teardown
 
-  local current_trial_number=1
+  # local current_trial_number=1
 
-  for ((rep=1; rep<=REPETITIONS_PER_TEST; rep++)); do
-  
-    for kem_label in "${sorted_kem_labels[@]}"; do
-        local kem_value="${KEM_GROUPS[${kem_label}]}"
+  # for ((rep=1; rep<=REPETITIONS_PER_TEST; rep++)); do
 
-        for network_label in "${sorted_network_labels[@]}"; do
-          local network_condition="${NETWORK_CONDITIONS[${network_label}]}" # in the form of "rtt=10ms loss=0%"
+  #   for kem_label in "${sorted_kem_labels[@]}"; do
+  #       local kem_value="${KEM_GROUPS[${kem_label}]}"
+
+  #       for network_label in "${sorted_network_labels[@]}"; do
+  #         local network_condition="${NETWORK_CONDITIONS[${network_label}]}" # in the form of "rtt=10ms loss=0%"
           
-          # Regex to capture digits after rtt= and loss=
-          if [[ $network_condition =~ rtt=([0-9]+)ms[[:space:]]+loss=([0-9]+)% ]]; then
-            local rtt="${BASH_REMATCH[1]}"
-            local loss="${BASH_REMATCH[2]}"
-          else
-            log "ERROR: Failed to parse network condition for ${network_label} (${network_condition})."
-            exit 1
-          fi
+  #         # Regex to capture digits after rtt= and loss=
+  #         if [[ $network_condition =~ rtt=([0-9]+)ms[[:space:]]+loss=([0-9]+)% ]]; then
+  #           local rtt="${BASH_REMATCH[1]}"
+  #           local loss="${BASH_REMATCH[2]}"
+  #         else
+  #           log "ERROR: Failed to parse network condition for ${network_label} (${network_condition})."
+  #           exit 1
+  #         fi
 
-          for users in "${USER_LEVELS[@]}"; do
-              if (( current_trial_number >= trial_start && current_trial_number <= trial_end )); then
-                start_up_containers "${kem_label}" "${kem_value}"
-                run_one_combination "${kem_label}" "${kem_value}" "${users}" "${rtt}" "${loss}" "${rep}" "$((current_trial_number))"
-                teardown
-              fi
+  #         for users in "${USER_LEVELS[@]}"; do
+  #             if (( current_trial_number >= trial_start && current_trial_number <= trial_end )); then
+  #               start_up_containers "${kem_label}" "${kem_value}"
+  #               run_one_combination "${kem_label}" "${kem_value}" "${users}" "${rtt}" "${loss}" "${rep}" "$((current_trial_number))"
+  #               teardown
+  #             fi
 
-              (( current_trial_number += 1 ))
-          done
+  #             (( current_trial_number += 1 ))
+  #         done
           
-        done
+  #       done
+  #     done
+
+  # done
+
+  local cells=()
+  for ((kem_idx=0; kem_idx<${#sorted_kem_labels[@]}; kem_idx++)); do
+    for ((network_idx=0; network_idx < ${#sorted_network_labels[@]}; network_idx++)); do
+      for ((users_idx=0; users_idx < ${#USER_LEVELS[@]}; users_idx++)); do
+        cells+=("${kem_idx}_${network_idx}_${users_idx}")
       done
+    done
+  done
+
+  for ((i=1; i<=REPETITIONS_PER_TEST; i++)); do
+    
+    log "Beginning sweep ${i} of ${REPETITIONS_PER_TEST}..."
+    readarray -t shuffled_cells < <(printf "%s\n" "${cells[@]}" | shuf)
+
+    for cell in "${shuffled_cells[@]}"; do
+      log "Processing cell ${cell} (sweep ${i})"
+    done
 
   done
 
