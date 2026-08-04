@@ -65,9 +65,14 @@ main() {
   done
 
   for ((i=1; i<=REPETITIONS_PER_TEST; i++)); do
+
+  readarray -t shuffled_cells < <(printf "%s\n" "${cells[@]}" | shuf)
     
+    log "================================================================="
     log "Beginning sweep ${i} of ${REPETITIONS_PER_TEST}..."
-    readarray -t shuffled_cells < <(printf "%s\n" "${cells[@]}" | shuf)
+    log "Shuffled cell order:"
+    log $(cat < <(printf "%s, " "${shuffled_cells[@]}"))
+    log "================================================================="
 
     for cell in "${shuffled_cells[@]}"; do
       IFS='_' read -r kem_idx network_idx users_idx <<< "${cell}"
