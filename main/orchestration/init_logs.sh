@@ -33,6 +33,7 @@ RTTs (ms): ${RTTS[*]}
 Loss levels (%): ${LOSS_LEVELS[*]}
 Target handshakes per trial: ${TARGET_HANDSHAKES}
 Max duration per run: ${MAX_DURATION}
+Shuffle cell order: ${SHUFFLE_CELL_ORDER}
 Sweeps to perform: ${REPETITIONS_PER_TEST}
 EOF
   } >> "${run_info_file_path}"

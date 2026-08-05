@@ -31,11 +31,15 @@ run_sweep() {
   local -n cells="$1"
   local sweep_num="$2"
 
-  readarray -t shuffled_cells < <(printf "%s\n" "${cells[@]}" | shuf)
+  local cell_order=("${cells[@]}")  # Copy the original cell order for logging purposes.
+  if ${SHUFFLE_CELL_ORDER}; then
+    cell_order=( $(shuf -e "${cell_order[@]}") )
+  fi
+
   local joined_cells
   {
     local IFS=", "
-    joined_cells="${shuffled_cells[*]-}"
+    joined_cells="${cell_order[*]-}"
   }
     
   log "================================================================="
@@ -46,7 +50,7 @@ run_sweep() {
 
   local current_trial_number=1
 
-  for cell in "${shuffled_cells[@]}"; do
+  for cell in "${cell_order[@]}"; do
     IFS='_' read -r kem_idx network_idx users_idx <<< "${cell}"
 
     local kem_label="${sorted_kem_labels[${kem_idx}]}"

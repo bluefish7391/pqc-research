@@ -21,3 +21,5 @@ readarray -t sorted_network_labels < <(printf '%s\n' "${!NETWORK_CONDITIONS[@]}"
 TARGET_HANDSHAKES=10000 # Total number of handshakes to perform in each trial.
 MAX_DURATION="15000s" # Headless Locust run max duration per combination (seconds).
 REPETITIONS_PER_TEST=10 # Number of times to repeat each combination for averaging or variance analysis.
+
+SHUFFLE_CELL_ORDER=true     # TODO: Make this configurable via command-line argument or environment variable.
