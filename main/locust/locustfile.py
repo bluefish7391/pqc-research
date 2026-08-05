@@ -169,8 +169,6 @@ class TLSHandshakeUser(User):
             # Python temporarily pauses the execution of this specific Locust user thread and 
             # hands control over to the operating system kernel.
 
-            start_time=time.time_ns()
-
             env = os.environ.copy()
             env["SSLKEYLOGFILE"] = self.keylog_path
 
@@ -192,7 +190,7 @@ class TLSHandshakeUser(User):
                 f"\r\n"
             ).encode("ascii")
 
-            log.info(f"Request start: greenlet_id={self.greenlet_id}, request_id={request_id}, start_time={start_time}, completed_handshakes={completed_handshakes}")
+            start_time=time.time_ns()
             result = subprocess.run(
                 # Array of command-line arguments for the OpenSSL s_client command.
                 s_client_cmd,
@@ -201,9 +199,9 @@ class TLSHandshakeUser(User):
                 timeout=10, # Set a timeout for the handshake operation to avoid hanging indefinitely. Measured in seconds.
                 env=env,
             )
-            log.info(f"Request end: greenlet_id={self.greenlet_id}, request_id={request_id}, end_time={time.time_ns()}, completed_handshakes={completed_handshakes}")
+            end_time=time.time_ns()
 
-            elapsed_ms = (time.perf_counter_ns() - start_ns) // 1_000_000
+            elapsed_ms = (end_time - start_ns) // 1_000_000
             
             # Record data for the handshake request. If the handshake was successful and the server 
             # responded with a 200 OK status, record the response time and length. Otherwise, raise 
