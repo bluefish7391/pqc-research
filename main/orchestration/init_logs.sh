@@ -1,35 +1,48 @@
 #!/usr/bin/env bash
 
+init_sweep_info() {
+  local sweep_num="$1"
+  local -n cell_order="$2"
+
+  local sweep_info_file_path="${SWEEP_DIR}/sweep_info.txt"
+  touch "${sweep_info_file_path}"
+
+  local joined_cells
+  {
+    local IFS=", "
+    joined_cells="${cell_order[*]-}"
+  }
+
+  cat << EOF >> "${sweep_info_file_path}"
+Sweep info for sweep ${sweep_num} started at $(date '+%Y-%m-%d %H:%M:%S')
+Cell order: ${joined_cells}
+EOF
+}
+
 init_run_info() {
-    if (( RESUME_MODE == 0 )); then
-    {
-        cat << EOF
-Run info for matrix sweep started at $(date '+%Y-%m-%d %H:%M:%S')
+  local run_info_file_path="${COLLECTION_DIR}/run_info.txt"
+  touch "${run_info_file_path}"
+
+  if (( RESUME_MODE == 0 )); then
+  { 
+      cat << EOF
+Run info for collection run started at $(date '+%Y-%m-%d %H:%M:%S')
 KEM groups: ${!KEM_GROUPS[*]}
 User levels: ${USER_LEVELS[*]}
 RTTs (ms): ${RTTS[*]}
 Loss levels (%): ${LOSS_LEVELS[*]}
 Target handshakes per trial: ${TARGET_HANDSHAKES}
 Max duration per run: ${MAX_DURATION}
-Repetitions per test: ${REPETITIONS_PER_TEST}
+Shuffle cell order: ${SHUFFLE_CELL_ORDER}
+Sweeps to perform: ${REPETITIONS_PER_TEST}
 EOF
-    } >> "${COLLECTION_DIR}/run_info.txt"
-    fi
-}
-
-init_main_log() {
-    log "Starting matrix sweep."
-    log "KEM groups: ${!KEM_GROUPS[*]}"
-    log "User levels: ${USER_LEVELS[*]}"
-    log "RTTs (ms): ${RTTS[*]}"
-    log "Loss levels (%): ${LOSS_LEVELS[*]}"
-    log "Target handshakes per trial: ${TARGET_HANDSHAKES}"
-    log "Max duration per run: ${MAX_DURATION}"
-    log "Repetitions per test: ${REPETITIONS_PER_TEST}"
+  } >> "${run_info_file_path}"
+  
+  fi
 }
 
 init_throttle_stats_csv() {
-  local out_file="${COLLECTION_DIR}/throttle_stats.csv"
+  local out_file="${SWEEP_DIR}/throttle_stats.csv"
   local header="run_id"
   local alias
   local metric
@@ -50,9 +63,4 @@ init_throttle_stats_csv() {
     log "ERROR: Failed to initialize ${out_file}"
     return 1
   fi
-}
-
-init_logs() {
-    init_run_info
-    init_throttle_stats_csv
 }

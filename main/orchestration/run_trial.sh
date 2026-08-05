@@ -63,7 +63,7 @@ run_one_combination() {
   local trial_number="$7"
 
   local run_id="${kem_label}_u${users}_rtt${rtt_ms}ms_loss${loss_pct}pct_rep${repetition}"
-  local trial_dir="${COLLECTION_DIR}/${run_id}"
+  local trial_dir="${SWEEP_DIR}/${run_id}"
   mkdir -p "${trial_dir}"
 
   log "════════════════════════════════════════════════════════════"
@@ -80,7 +80,7 @@ run_one_combination() {
   # Write the captured packets to a pcap file named after the run_id in the PCAP_DIR.
   # Start tshark and capture stderr so we can detect readiness text.
   tshark_log="${trial_dir}/tshark_log.log"
-  local pcap_path="/mnt/collection/${run_id}/pcap.pcap"
+  local pcap_path="/mnt/sweep/${run_id}/pcap.pcap"
   NGINX_IFACE=$(docker compose exec -T -u root router \
     sh -c "ip -o addr show | awk '/172\\.20\\.0\\.2/{print \$2}'" \
     | tr -d '\r')
@@ -184,7 +184,7 @@ run_one_combination() {
   if [ "${throttle_capture_ok}" -eq 1 ]; then
     log "Starting headless Locust run..."
     local locust_log_file="${trial_dir}/locust_log.log"
-    local main_locust_output_dir="/mnt/collection/${run_id}/locust"
+    local main_locust_output_dir="/mnt/sweep/${run_id}/locust"
     local locust_rc=0
 
     mkdir "${trial_dir}/locust"
@@ -238,27 +238,4 @@ run_one_combination() {
   write_throttle_stats "${run_id}" throttle_capture_ok throttle_snapshots_before throttle_snapshots_after
 
   log "Data collection complete."
-}
-
-write_keylog() {
-  local trial_dir="$1"
-
-  mkdir -p "${trial_dir}/keylogs"
-  if [ -d "${LOCUST_OUT_DIR}/keylogs" ]; then
-    if sudo -n chown -R "$(id -u):$(id -g)" "${LOCUST_OUT_DIR}/keylogs" 2>/dev/null; then
-      log "Adjusted ownership on ${LOCUST_OUT_DIR}/keylogs before archiving."
-    else
-      log "WARNING: unable to adjust ownership on ${LOCUST_OUT_DIR}/keylogs; continuing with best-effort copy."
-    fi
-
-    if find "${LOCUST_OUT_DIR}/keylogs" -mindepth 1 -maxdepth 1 -print -quit | grep -q .; then
-      if mv "${LOCUST_OUT_DIR}/keylogs"/* "${trial_dir}/keylogs/" 2>/dev/null; then
-        :
-      else
-        cp -a "${LOCUST_OUT_DIR}/keylogs"/. "${trial_dir}/keylogs"/
-      fi
-    fi
-  fi
-
-  cat "${trial_dir}/keylogs"/* 2>/dev/null > "${trial_dir}/complete_keylog.log"
 }
