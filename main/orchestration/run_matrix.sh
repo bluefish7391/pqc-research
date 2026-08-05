@@ -27,8 +27,6 @@ export MSYS_NO_PATHCONV=1
 resume_init_state # Declares and initializes variables related to resuming a sweep.
 resume_parse_args "$@" # Parses command-line arguments to determine if the script should resume a previous sweep or start a new one. Sets associated variables accordingly.
 
-init_paths
-
 run_sweep() {
   local -n cells="$1"
   local sweep_num="$2"
@@ -74,6 +72,7 @@ run_sweep() {
 }
 
 main() {
+  init_paths
   cd "${PROJECT_DIR}"
 
   local total_combinations=$(( ${#KEM_GROUPS[@]} * ${#USER_LEVELS[@]} * ${#NETWORK_CONDITIONS[@]} ))
@@ -95,6 +94,8 @@ main() {
   # Ensure a clean slate before the sweep starts.
   teardown
 
+  init_run_info
+
   local all_cells=()
   for ((kem_idx=0; kem_idx<${#sorted_kem_labels[@]}; kem_idx++)); do
     for ((network_idx=0; network_idx < ${#sorted_network_labels[@]}; network_idx++)); do
@@ -107,7 +108,9 @@ main() {
   for ((i=1; i<=REPETITIONS_PER_TEST; i++)); do
     SWEEP_DIR="${COLLECTION_DIR}/sweep_${i}"
     mkdir "${SWEEP_DIR}"
-    init_logs
+
+    init_throttle_stats_csv
+    init_sweep_info "${i}" all_cells
 
     run_sweep all_cells ${i}
   done
