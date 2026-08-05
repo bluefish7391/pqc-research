@@ -45,7 +45,7 @@ def _setup_process_outputs(process_label):
     csv_path = f"{MAIN_OUTPUT_DIR}/requests/worker_{WORKER_ID}_requests.csv"
     _csv_file = open(csv_path, "w", newline="")
     _csv_writer = csv.writer(_csv_file)
-    _csv_writer.writerow(["request_id", "greenlet_id", "start_time_ns", "end_time_ns", "response_time_ms", "response_length", "success", "exception"])
+    _csv_writer.writerow(["request_id", "greenlet_id", "start_time_ns", "end_time_ns", "response_length", "success", "exception"])
 
 @events.request.add_listener
 def log_request_to_csv(request_type, name, response_time, response_length, exception, context, **kwargs):
@@ -56,7 +56,6 @@ def log_request_to_csv(request_type, name, response_time, response_length, excep
         context.get("greenlet_id"),
         context.get("start_time_ns"),
         context.get("end_time_ns"),
-        response_time,
         response_length,
         exception is not None,
         str(exception) if exception else "",
@@ -200,8 +199,6 @@ class TLSHandshakeUser(User):
                 env=env,
             )
             end_time=time.time_ns()
-
-            elapsed_ms = (end_time - start_ns) // 1_000_000
             
             # Record data for the handshake request. If the handshake was successful and the server 
             # responded with a 200 OK status, record the response time and length. Otherwise, raise 
@@ -211,10 +208,10 @@ class TLSHandshakeUser(User):
                 events.request.fire(
                     request_type    = "TLS-Handshake",
                     name            = f"GET / [{KEM_GROUP}]",
-                    response_time   = elapsed_ms,
+                    response_time   = (end_time - start_time) // 1_000_000,
                     response_length = len(stdout),
                     exception       = None,
-                    context         = {"request_id": request_id, "greenlet_id": self.greenlet_id, "start_time_ns": start_time, "end_time_ns": time.time_ns()},
+                    context         = {"request_id": request_id, "greenlet_id": self.greenlet_id, "start_time_ns": start_time, "end_time_ns": end_time},
                 )
             else:
                 stderr = result.stderr.decode("ascii", errors="replace").strip()
