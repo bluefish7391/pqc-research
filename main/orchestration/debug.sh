@@ -4,6 +4,11 @@
 # are not part of the main collection workflow but can be invoked manually for analysis purposes.
 # May be reused for actual analysis scripts in the future.
 
+generate_master_keylog() {
+  local trial_dir="$1"
+  cat "${trial_dir}/keylogs/"* > "${trial_dir}/master_keylog.log"
+}
+
 extract_pcap_metrics() {
   local run_id="$1"
   local trial_dir="$2"

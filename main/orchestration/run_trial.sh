@@ -3,6 +3,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 source "${SCRIPT_DIR}/helpers.sh"
 source "${SCRIPT_DIR}/capture_throttle.sh"
+source "${SCRIPT_DIR}/debug.sh"
 
 # Must match the --processes value passed to the locust invocation below —
 # kept as one variable so the two can't silently drift apart.
@@ -236,6 +237,7 @@ run_one_combination() {
   wait $TSHARK_PID 2>/dev/null || true
 
   write_throttle_stats "${run_id}" throttle_capture_ok throttle_snapshots_before throttle_snapshots_after
+  generate_master_keylog "${trial_dir}"
 
   log "Data collection complete."
 }
