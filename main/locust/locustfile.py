@@ -68,18 +68,6 @@ log = logging.getLogger("oqs-tls")
 log.setLevel(logging.INFO)
 log.propagate = False  # avoid duplicate lines also going to Locust's console handler
 
-# Create the HTTP request to be sent after the TLS handshake, identical for all users, 
-# so can be precomputed once.
-# Because the s_client command is being used instead of an HTTP library, the request
-# has to be manually constructed to be piped into the process's stdin.
-HTTP_REQUEST = (
-    f"GET / HTTP/1.1\r\n"
-    f"Host: {TARGET_HOST}\r\n"
-    f"Connection: close\r\n"
-    f"\r\n"
-).encode("ascii")
-
-
 # Signal handler to dump greenlet information when receiving SIGUSR1. This is useful for debugging and monitoring the state of the Locust users during execution.
 def dump_greenlets(signum, frame):
     log.info("=== GREENLET DUMP ===")
@@ -195,6 +183,14 @@ class TLSHandshakeUser(User):
                 "-nocommands", # Suppress interactive commands, HTTP request will be sent via stdin.
                 "-keylogfile", self.keylog_path,
             ]
+
+            HTTP_REQUEST = (
+                f"GET / HTTP/1.1\r\n"
+                f"Host: {TARGET_HOST}\r\n"
+                f"Request-ID: {request_id}\r\n"
+                f"Connection: close\r\n"
+                f"\r\n"
+            ).encode("ascii")
 
             log.info(f"Request start: greenlet_id={self.greenlet_id}, request_id={request_id}, start_time={start_time}, completed_handshakes={completed_handshakes}")
             result = subprocess.run(
