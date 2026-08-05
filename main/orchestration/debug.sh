@@ -10,21 +10,19 @@ generate_master_keylog() {
 }
 
 extract_pcap_metrics() {
-  local run_id="$1"
-  local trial_dir="$2"
-  local pcap_file="$3"
-  local keylog="$4"
-  local out="${trial_dir}/pcap_summary_${run_id}.csv"
+  local trial_dir="$1"      # Represents the path to the directory on the host machine
+  local mounted_trial_dir="$2" # Represents the path to the directory as mounted on the router container.
+  local pcap_path="${mounted_trial_dir}/capture.pcap"
+  local keylog="${mounted_trial_dir}/master_keylog.log"
+  local out="${trial_dir}/pcap_summary.csv"
 
-  # TODO: Perform tshark metric extraction on host instead of inside router container
   docker compose exec -T router \
-  tshark -r "${pcap_file}" \
+  tshark -r "${pcap_path}" \
+    -o "tls.keylog_file:${keylog}" \
     -T fields \
     -e frame.time_epoch -e ip.src -e ip.dst -e tcp.stream \
     -e tcp.flags -e tls.handshake.type -e tls.record.content_type \
     -E separator=, -E quote=d -E occurrence=a -E aggregator=";" \
     -E header=y \
-    > "${out}" 2>&1 || log "WARNING: tshark summary failed for run_id ${run_id}."
-  
-   # -o "tls.keylog_file:${keylog}" \
+    > "${out}" 2>&1
 }
