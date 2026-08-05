@@ -45,15 +45,15 @@ def _setup_process_outputs(process_label):
     csv_path = f"{MAIN_OUTPUT_DIR}/requests/worker_{WORKER_ID}_requests.csv"
     _csv_file = open(csv_path, "w", newline="")
     _csv_writer = csv.writer(_csv_file)
-    _csv_writer.writerow(["request_id", "greenlet_id", "start_time_ns", "end_time_ns", "response_length", "success", "exception"])
+    _csv_writer.writerow(["greenlet_id", "request_id", "start_time_ns", "end_time_ns", "response_length", "success", "exception"])
 
 @events.request.add_listener
 def log_request_to_csv(request_type, name, response_time, response_length, exception, context, **kwargs):
     if _csv_writer is None:
         return
     _csv_writer.writerow([
-        context.get("request_id"),
         context.get("greenlet_id"),
+        context.get("request_id"),
         context.get("start_time_ns"),
         context.get("end_time_ns"),
         response_length,
@@ -211,7 +211,7 @@ class TLSHandshakeUser(User):
                     response_time   = (end_time - start_time) // 1_000_000,
                     response_length = len(stdout),
                     exception       = None,
-                    context         = {"request_id": request_id, "greenlet_id": self.greenlet_id, "start_time_ns": start_time, "end_time_ns": end_time},
+                    context         = {"greenlet_id": self.greenlet_id, "request_id": request_id, "start_time_ns": start_time, "end_time_ns": end_time},
                 )
             else:
                 stderr = result.stderr.decode("ascii", errors="replace").strip()
