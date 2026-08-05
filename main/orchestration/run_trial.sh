@@ -3,6 +3,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 source "${SCRIPT_DIR}/helpers.sh"
 source "${SCRIPT_DIR}/capture_throttle.sh"
+source "${SCRIPT_DIR}/debug.sh"
 
 # Must match the --processes value passed to the locust invocation below —
 # kept as one variable so the two can't silently drift apart.
@@ -80,7 +81,7 @@ run_one_combination() {
   # Write the captured packets to a pcap file named after the run_id in the PCAP_DIR.
   # Start tshark and capture stderr so we can detect readiness text.
   tshark_log="${trial_dir}/tshark_log.log"
-  local pcap_path="/mnt/sweep/${run_id}/pcap.pcap"
+  local pcap_path="/mnt/sweep/${run_id}/capture.pcap"
   NGINX_IFACE=$(docker compose exec -T -u root router \
     sh -c "ip -o addr show | awk '/172\\.20\\.0\\.2/{print \$2}'" \
     | tr -d '\r')
