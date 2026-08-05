@@ -7,9 +7,15 @@ init_sweep_info() {
   local sweep_info_file_path="${SWEEP_DIR}/sweep_info.txt"
   touch "${sweep_info_file_path}"
 
+  local joined_cells
+  {
+    local IFS=", "
+    joined_cells="${cell_order[*]-}"
+  }
+
   cat << EOF >> "${sweep_info_file_path}"
 Sweep info for sweep ${sweep_num} started at $(date '+%Y-%m-%d %H:%M:%S')
-Cell order: $(cat < <(printf "%s, " "${cell_order[@]}"))
+Cell order: ${joined_cells}
 EOF
 }
 

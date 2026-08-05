@@ -32,11 +32,16 @@ run_sweep() {
   local sweep_num="$2"
 
   readarray -t shuffled_cells < <(printf "%s\n" "${cells[@]}" | shuf)
+  local joined_cells
+  {
+    local IFS=", "
+    joined_cells="${shuffled_cells[*]-}"
+  }
     
   log "================================================================="
   log "Beginning sweep ${sweep_num} of ${REPETITIONS_PER_TEST}..."
   log "Shuffled cell order:"
-  log $(cat < <(printf "%s, " "${shuffled_cells[@]}"))
+  log "${joined_cells}"
   log "================================================================="
 
   local current_trial_number=1
