@@ -237,8 +237,6 @@ run_one_combination() {
   wait $TSHARK_PID 2>/dev/null || true
 
   write_throttle_stats "${run_id}" throttle_capture_ok throttle_snapshots_before throttle_snapshots_after
-  generate_master_keylog "${trial_dir}"
-  extract_pcap_metrics "${trial_dir}" "/mnt/sweep/${run_id}"
 
   log "Data collection complete."
 }
