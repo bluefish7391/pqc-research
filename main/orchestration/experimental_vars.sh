@@ -8,7 +8,7 @@ declare -A KEM_GROUPS=(
 readarray -t sorted_kem_labels < <(printf '%s\n' "${!KEM_GROUPS[@]}" | sort)
 
 SPAWN_RATE=10
-USER_LEVELS=(10) # Number of concurrent users to simulate in Locust. This is the -u parameter for locust.
+USER_LEVELS=(1) # Number of concurrent users to simulate in Locust. This is the -u parameter for locust.
 
 declare -A NETWORK_CONDITIONS=(
   ["B1"]="rtt=10ms loss=0%"

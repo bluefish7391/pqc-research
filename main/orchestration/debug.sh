@@ -22,6 +22,7 @@ extract_pcap_metrics() {
     -T fields \
     -e frame.time_epoch -e ip.src -e ip.dst -e tcp.stream \
     -e tcp.flags -e tls.handshake.type -e tls.record.content_type \
+    -e http.request.line \
     -E separator=, -E quote=d -E occurrence=a -E aggregator=";" \
     -E header=y \
     > "${out}" 2>&1
