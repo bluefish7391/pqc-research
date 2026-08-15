@@ -24,7 +24,32 @@ REPETITIONS_PER_TEST=60 # Default repetition count used by cells with no REPS_PE
 
 # Optional per-cell repetition overrides, keyed by cell label (same convention as a
 # trial's run_id with its trailing "_repN" stripped), e.g. ["hybrid_u10_rtt100ms_loss2pct"]=30.
+# Values below come from pilot power analysis.
 declare -A REPS_PER_CELL=(
+  ["classical_u100_rtt100ms_loss2pct"]=14
+  ["classical_u100_rtt10ms_loss0pct"]=3
+  ["classical_u100_rtt200ms_loss5pct"]=10
+  ["classical_u100_rtt50ms_loss1pct"]=16
+  ["classical_u10_rtt100ms_loss2pct"]=20
+  ["classical_u10_rtt10ms_loss0pct"]=2
+  ["classical_u10_rtt200ms_loss5pct"]=10
+  ["classical_u10_rtt50ms_loss1pct"]=101
+  ["classical_u50_rtt100ms_loss2pct"]=29
+  ["classical_u50_rtt10ms_loss0pct"]=2
+  ["classical_u50_rtt200ms_loss5pct"]=10
+  ["classical_u50_rtt50ms_loss1pct"]=81
+  ["hybrid_u100_rtt100ms_loss2pct"]=18
+  ["hybrid_u100_rtt10ms_loss0pct"]=3
+  ["hybrid_u100_rtt200ms_loss5pct"]=19
+  ["hybrid_u100_rtt50ms_loss1pct"]=63
+  ["hybrid_u10_rtt100ms_loss2pct"]=29
+  ["hybrid_u10_rtt10ms_loss0pct"]=11
+  ["hybrid_u10_rtt200ms_loss5pct"]=24
+  ["hybrid_u10_rtt50ms_loss1pct"]=29
+  ["hybrid_u50_rtt100ms_loss2pct"]=17
+  ["hybrid_u50_rtt10ms_loss0pct"]=3
+  ["hybrid_u50_rtt200ms_loss5pct"]=15
+  ["hybrid_u50_rtt50ms_loss1pct"]=16
 )
 
 get_reps_for_cell() {
