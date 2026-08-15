@@ -57,4 +57,4 @@ get_reps_for_cell() {
   echo "${REPS_PER_CELL[${cell_label}]:-${REPETITIONS_PER_TEST}}"
 }
 
-SHUFFLE_CELL_ORDER=true     # TODO: Make this configurable via command-line argument or environment variable.
+SHUFFLE_TRIAL_ORDER=true     # TODO: Make this configurable via command-line argument or environment variable.

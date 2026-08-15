@@ -55,36 +55,30 @@ resolve_cell() {
 
 run_cell() {
   local cell="$1"
-  local trial_start="$2"
-  local trial_end="$3"
-  local -n current_trial_number_ref="$4"
+  local rep="$2"
+  local trial_start="$3"
+  local trial_end="$4"
+  local current_trial_number="$5"
+  local -n cell_initialized_ref="$6"
 
   local kem_label kem_value rtt loss users cell_label
   resolve_cell "${cell}"
-
-  local reps
-  reps="$(get_reps_for_cell "${cell_label}")"
 
   CELL_DIR="${COLLECTION_DIR}/${cell_label}"
   mkdir -p "${CELL_DIR}"
   export CELL_DIR
 
-  init_throttle_stats_csv
-  init_cell_info "${cell_label}" "${reps}"
+  if [[ -z "${cell_initialized_ref[${cell_label}]:-}" ]]; then
+    init_throttle_stats_csv
+    init_cell_info "${cell_label}" "$(get_reps_for_cell "${cell_label}")"
+    cell_initialized_ref["${cell_label}"]=1
+  fi
 
-  log "================================================================="
-  log "Beginning cell ${cell_label} (${reps} repetition(s))..."
-  log "================================================================="
-
-  for ((rep=1; rep<=reps; rep++)); do
-    if (( current_trial_number_ref >= trial_start && current_trial_number_ref <= trial_end )); then
-      start_up_containers "${kem_label}" "${kem_value}"
-      run_one_combination "${kem_label}" "${kem_value}" "${users}" "${rtt}" "${loss}" "${rep}" "$((current_trial_number_ref))"
-      teardown
-    fi
-
-    (( current_trial_number_ref += 1 ))
-  done
+  if (( current_trial_number >= trial_start && current_trial_number <= trial_end )); then
+    start_up_containers "${kem_label}" "${kem_value}"
+    run_one_combination "${kem_label}" "${kem_value}" "${users}" "${rtt}" "${loss}" "${rep}" "${current_trial_number}"
+    teardown
+  fi
 }
 
 main() {
@@ -100,18 +94,24 @@ main() {
     done
   done
 
-  local cell_order=("${all_cells[@]}")
-  if ${SHUFFLE_CELL_ORDER}; then
-    cell_order=( $(shuf -e "${cell_order[@]}") )
-  fi
-
-  local total_trials=0
-  for cell in "${cell_order[@]}"; do
+  # Flatten to one entry per (cell, repetition) trial so SHUFFLE_TRIAL_ORDER can
+  # randomize execution order across the whole run, not just across cells.
+  local trial_units=()
+  for cell in "${all_cells[@]}"; do
     local kem_label kem_value rtt loss users cell_label
     resolve_cell "${cell}"
-    (( total_trials += $(get_reps_for_cell "${cell_label}") ))
+    local reps
+    reps="$(get_reps_for_cell "${cell_label}")"
+    for ((rep=1; rep<=reps; rep++)); do
+      trial_units+=("${cell}:${rep}")
+    done
   done
 
+  if ${SHUFFLE_TRIAL_ORDER}; then
+    trial_units=( $(shuf -e "${trial_units[@]}") )
+  fi
+
+  local total_trials=${#trial_units[@]}
   local trial_start=1
   local trial_end=${total_trials}
 
@@ -129,10 +129,15 @@ main() {
   teardown
 
   init_run_info
+  log_trial_order trial_units
 
+  declare -A cell_initialized=()
   local current_trial_number=1
-  for cell in "${cell_order[@]}"; do
-    run_cell "${cell}" "${trial_start}" "${trial_end}" current_trial_number
+  for trial_unit in "${trial_units[@]}"; do
+    local cell rep
+    IFS=':' read -r cell rep <<< "${trial_unit}"
+    run_cell "${cell}" "${rep}" "${trial_start}" "${trial_end}" "${current_trial_number}" cell_initialized
+    (( current_trial_number += 1 ))
   done
 
   log "Matrix sweep complete."

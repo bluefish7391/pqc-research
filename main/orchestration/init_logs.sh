@@ -27,12 +27,29 @@ RTTs (ms): ${RTTS[*]}
 Loss levels (%): ${LOSS_LEVELS[*]}
 Target handshakes per trial: ${TARGET_HANDSHAKES}
 Max duration per run: ${MAX_DURATION}
-Shuffle cell order: ${SHUFFLE_CELL_ORDER}
+Shuffle trial order: ${SHUFFLE_TRIAL_ORDER}
 Default repetitions per cell: ${REPETITIONS_PER_TEST}
 Per-cell repetition overrides: ${!REPS_PER_CELL[*]-none}
 EOF
   } >> "${run_info_file_path}"
   
+  fi
+}
+
+log_trial_order() {
+  local -n trial_units_ref="$1"
+  local run_info_file_path="${COLLECTION_DIR}/run_info.txt"
+
+  if (( RESUME_MODE == 0 )); then
+    local trial_unit cell rep kem_label kem_value rtt loss users cell_label
+    {
+      echo "Trial execution order (cell_label:repetition), ${#trial_units_ref[@]} total:"
+      for trial_unit in "${trial_units_ref[@]}"; do
+        IFS=':' read -r cell rep <<< "${trial_unit}"
+        resolve_cell "${cell}"
+        echo "${cell_label}:${rep}"
+      done
+    } >> "${run_info_file_path}"
   fi
 }
 
