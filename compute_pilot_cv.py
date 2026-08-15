@@ -20,9 +20,9 @@ Per-(sweep, cell) processing:
          `exception is not None` into the success field)
        - start_time_ns >= t_start + WARMUP_SEC * 1e9
        - end_time_ns   <= t_end   - COOLDOWN_SEC * 1e9
-  5. Sort by start_time_ns; if fewer than HANDSHAKE_TARGET rows remain, log a
+  5. Sort by start_time_ns; if fewer than ANALYSIS_HANDSHAKE_TARGET rows remain, log a
       warning but still compute P50/P90/P99 using all eligible rows. If at least
-      HANDSHAKE_TARGET rows remain, use the first HANDSHAKE_TARGET rows (in time
+      ANALYSIS_HANDSHAKE_TARGET rows remain, use the first ANALYSIS_HANDSHAKE_TARGET rows (in time
       order) for percentile computation.
 
 Then, per cell, aggregate per-sweep P50/P90/P99 values across sweeps with at
@@ -37,7 +37,7 @@ Outputs (written into the collection directory):
                              means, per-trial percentile values (semicolon-
                              separated), CVs, and average throughput
     warnings.log         -- one line per (sweep, cell) that fell short of
-                             HANDSHAKE_TARGET eligible handshakes
+                             ANALYSIS_HANDSHAKE_TARGET eligible handshakes
 """
 
 import argparse
@@ -53,7 +53,8 @@ from pathlib import Path
 # ---- Tunable constants -----------------------------------------------------
 WARMUP_SEC = 10          # seconds after trial start to discard
 COOLDOWN_SEC = 10        # seconds before trial end to discard
-HANDSHAKE_TARGET = 10_000  # eligible handshakes required per (sweep, cell)
+ANALYSIS_HANDSHAKE_TARGET = 10_000  # handshakes used for percentile analysis
+TOTAL_HANDSHAKE_TARGET = 15_000  # handshakes actually completed by each trial
 OUTPUT_PERCENTILES = ("p50", "p90", "p95")
 REPETITION_PERCENTILES = ("p50", "p90", "p95")
 CELL_NAME_RE = re.compile(r"^(?P<base>.+)_rep\d+$")
@@ -195,7 +196,11 @@ def compute_cell_percentiles(rows, percentile_specs):
     if counts["eligible_count"] == 0:
         return None, counts
 
-    window = eligible[:HANDSHAKE_TARGET] if counts["eligible_count"] >= HANDSHAKE_TARGET else eligible
+    window = (
+        eligible[:ANALYSIS_HANDSHAKE_TARGET]
+        if counts["eligible_count"] >= ANALYSIS_HANDSHAKE_TARGET
+        else eligible
+    )
     latencies_ms = [(r["end_time_ns"] - r["start_time_ns"]) / 1e6 for r in window]
     window_start_ns = window[0]["start_time_ns"]
     window_end_ns = window[-1]["end_time_ns"]
@@ -402,7 +407,7 @@ def main():
             # Track true eligible volume per trial for visibility into shortfalls.
             per_cell_handshakes_counted[cell_name].append(counts["eligible_count"])
 
-            if counts["eligible_count"] < HANDSHAKE_TARGET:
+            if counts["eligible_count"] < ANALYSIS_HANDSHAKE_TARGET:
                 warnings.append((sweep_dir.name, cell_name, counts))
 
             if result is None:
@@ -420,7 +425,7 @@ def main():
             f.write("No cells fell short of the eligible-handshake target.\n")
         else:
             f.write(
-                f"Cells falling short of HANDSHAKE_TARGET={HANDSHAKE_TARGET} "
+                f"Cells falling short of ANALYSIS_HANDSHAKE_TARGET={ANALYSIS_HANDSHAKE_TARGET} "
                 f"eligible handshakes (after warmup={WARMUP_SEC}s, cooldown={COOLDOWN_SEC}s, success-only filter):\n"
             )
             for sweep_name, cell_name, counts in warnings:
@@ -435,13 +440,18 @@ def main():
     with open(results_path, "w", newline="") as f:
         writer = csv.writer(f)
         header = ["cell", "n_valid_sweeps", "eligible_handshakes_counted"]
-        header += ["avg_throughput_hps"]
+        header += ["avg_throughput_hps", "estimated_trial_duration_sec"]
         for p in output_percentile_labels:
             header += [f"{p}_mean_ms", f"{p}_values_ms", f"{p}_cv"]
-        header += ["max_cv", "recommended_repetitions_per_group"]
+        header += [
+            "max_cv",
+            "recommended_repetitions_per_group",
+            "estimated_experiment_hours",
+        ]
         writer.writerow(header)
 
         global_max_cv_for_repetitions = None
+        total_experiment_hours = 0.0
 
         for cell_name in cell_names:
             row = [cell_name]
@@ -451,6 +461,12 @@ def main():
             throughput_values = per_cell_throughputs_hps[cell_name]
             mean_throughput = statistics.mean(throughput_values) if throughput_values else None
             row.append(f"{mean_throughput:.3f}" if mean_throughput is not None else "NA")
+            trial_duration_sec = (
+                TOTAL_HANDSHAKE_TARGET / mean_throughput
+                if mean_throughput is not None and mean_throughput > 0
+                else None
+            )
+            row.append(f"{trial_duration_sec:.3f}" if trial_duration_sec is not None else "NA")
 
             cell_cvs = []
             for p in output_percentile_labels:
@@ -484,6 +500,14 @@ def main():
             repetitions = repetitions_from_max_cv(cell_max_cv_for_repetitions)
             row.append(f"{cell_max_cv:.4f}" if cell_max_cv is not None else "NA")
             row.append(repetitions if repetitions is not None else "NA")
+            experiment_hours = (
+                trial_duration_sec * repetitions / 3600
+                if trial_duration_sec is not None and repetitions is not None
+                else None
+            )
+            if experiment_hours is not None:
+                total_experiment_hours += experiment_hours
+            row.append(f"{experiment_hours:.3f}" if experiment_hours is not None else "NA")
             writer.writerow(row)
 
     print(f"Wrote results to {results_path}")
@@ -498,6 +522,10 @@ def main():
             f"({global_max_cv_for_repetitions:.4f}): {repetitions} "
             f"(effect={RELATIVE_EFFECT_SIZE}, alpha={ALPHA}, power={POWER}, ratio={GROUP_RATIO})"
         )
+    print(
+        f"Estimated main-experiment time for {TOTAL_HANDSHAKE_TARGET:,} handshakes/trial: "
+        f"{total_experiment_hours:.3f} hour(s)"
+    )
 
 
 if __name__ == "__main__":
