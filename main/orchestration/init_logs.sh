@@ -1,21 +1,15 @@
 #!/usr/bin/env bash
 
-init_sweep_info() {
-  local sweep_num="$1"
-  local -n cell_order="$2"
+init_cell_info() {
+  local cell_label="$1"
+  local reps="$2"
 
-  local sweep_info_file_path="${SWEEP_DIR}/sweep_info.txt"
-  touch "${sweep_info_file_path}"
+  local cell_info_file_path="${CELL_DIR}/cell_info.txt"
+  touch "${cell_info_file_path}"
 
-  local joined_cells
-  {
-    local IFS=", "
-    joined_cells="${cell_order[*]-}"
-  }
-
-  cat << EOF >> "${sweep_info_file_path}"
-Sweep info for sweep ${sweep_num} started at $(date '+%Y-%m-%d %H:%M:%S')
-Cell order: ${joined_cells}
+  cat << EOF >> "${cell_info_file_path}"
+Cell info for ${cell_label} started at $(date '+%Y-%m-%d %H:%M:%S')
+Repetitions for this cell: ${reps}
 EOF
 }
 
@@ -34,7 +28,8 @@ Loss levels (%): ${LOSS_LEVELS[*]}
 Target handshakes per trial: ${TARGET_HANDSHAKES}
 Max duration per run: ${MAX_DURATION}
 Shuffle cell order: ${SHUFFLE_CELL_ORDER}
-Sweeps to perform: ${REPETITIONS_PER_TEST}
+Default repetitions per cell: ${REPETITIONS_PER_TEST}
+Per-cell repetition overrides: ${!REPS_PER_CELL[*]-none}
 EOF
   } >> "${run_info_file_path}"
   
@@ -42,7 +37,7 @@ EOF
 }
 
 init_throttle_stats_csv() {
-  local out_file="${SWEEP_DIR}/throttle_stats.csv"
+  local out_file="${CELL_DIR}/throttle_stats.csv"
   local header="run_id"
   local alias
   local metric

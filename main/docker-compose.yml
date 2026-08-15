@@ -56,7 +56,7 @@ services:
         ipv4_address: 172.21.0.2
     volumes:
       - ./router/entrypoint.sh:/entrypoint.sh:ro
-      - ${SWEEP_DIR:-./data}:/mnt/sweep:rw
+      - ${CELL_DIR:-./data}:/mnt/cell:rw
     entrypoint: ["/entrypoint.sh"]
     cap_add:
       - NET_ADMIN
@@ -92,7 +92,7 @@ services:
     ports:
       - "8089:8089"                  # Unused in headless sweeps; left open for manual debugging
     volumes:
-      - ${SWEEP_DIR:-./data}:/mnt/sweep:rw
+      - ${CELL_DIR:-./data}:/mnt/cell:rw
       - ./locust:/mnt/locust
       - ./certs:/certs:ro            # Available for optional CA pinning
     extra_hosts:

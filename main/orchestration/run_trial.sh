@@ -64,7 +64,7 @@ run_one_combination() {
   local trial_number="$7"
 
   local run_id="${kem_label}_u${users}_rtt${rtt_ms}ms_loss${loss_pct}pct_rep${repetition}"
-  local trial_dir="${SWEEP_DIR}/${run_id}"
+  local trial_dir="${CELL_DIR}/${run_id}"
   mkdir -p "${trial_dir}"
 
   log "════════════════════════════════════════════════════════════"
@@ -81,7 +81,7 @@ run_one_combination() {
   # Write the captured packets to a pcap file named after the run_id in the PCAP_DIR.
   # Start tshark and capture stderr so we can detect readiness text.
   tshark_log="${trial_dir}/tshark_log.log"
-  local pcap_path="/mnt/sweep/${run_id}/capture.pcap"
+  local pcap_path="/mnt/cell/${run_id}/capture.pcap"
   NGINX_IFACE=$(docker compose exec -T -u root router \
     sh -c "ip -o addr show | awk '/172\\.20\\.0\\.2/{print \$2}'" \
     | tr -d '\r')
@@ -185,7 +185,7 @@ run_one_combination() {
   if [ "${throttle_capture_ok}" -eq 1 ]; then
     log "Starting headless Locust run..."
     local locust_log_file="${trial_dir}/locust_log.log"
-    local main_locust_output_dir="/mnt/sweep/${run_id}/locust"
+    local main_locust_output_dir="/mnt/cell/${run_id}/locust"
     local locust_rc=0
 
     mkdir "${trial_dir}/locust"
