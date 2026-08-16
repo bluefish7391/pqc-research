@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Plot per-request latency across Locust worker request CSVs.
 
-Given an absolute path to a Locust requests directory containing
-``worker_*_requests.csv`` files, this script computes request duration as:
+Given an absolute path to a trial directory containing
+``locust/requests/worker_*_requests.csv`` files, this script computes request duration as:
 
     duration_ms = (end_time_ns - start_time_ns) / 1e6
 
@@ -24,14 +24,18 @@ from pathlib import Path
 HISTOGRAM_BUCKET_SIZES_S = [0.01, 0.05, 0.1, 1]
 
 
-def resolve_requests_dir(requests_dir_arg: str) -> Path:
-    path = Path(requests_dir_arg)
+def resolve_trial_dir(trial_dir_arg: str) -> Path:
+    path = Path(trial_dir_arg)
     if not path.is_absolute():
-        sys.exit(f"ERROR: requests directory must be an absolute path: {requests_dir_arg}")
+        sys.exit(f"ERROR: trial directory must be an absolute path: {trial_dir_arg}")
 
-    requests_dir = path.resolve()
+    trial_dir = path.resolve()
+    if not trial_dir.is_dir():
+        sys.exit(f"ERROR: trial directory not found: {trial_dir}")
+
+    requests_dir = trial_dir / "locust" / "requests"
     if not requests_dir.is_dir():
-        sys.exit(f"ERROR: requests directory not found: {requests_dir}")
+        sys.exit(f"ERROR: requests directory not found under trial directory: {requests_dir}")
     return requests_dir
 
 
@@ -245,11 +249,11 @@ def render_scatter(points, output_html: str | None, histogram_bucket_sizes_s=Non
 def main():
     parser = argparse.ArgumentParser(
         description=(
-            "Plot per-request duration scatter from a locust/requests directory "
-            "containing worker_*_requests.csv files."
+            "Plot per-request duration scatter from a trial directory containing "
+            "locust/requests/worker_*_requests.csv files."
         )
     )
-    parser.add_argument("requests_dir", help="Absolute path to locust/requests directory.")
+    parser.add_argument("trial_dir", help="Absolute path to the trial directory containing locust/requests.")
     parser.add_argument(
         "--expected-workers",
         type=int,
@@ -271,7 +275,7 @@ def main():
     )
     args = parser.parse_args()
 
-    requests_dir = resolve_requests_dir(args.requests_dir)
+    requests_dir = resolve_trial_dir(args.trial_dir)
     worker_files = discover_worker_files(requests_dir, args.expected_workers)
 
     worker_rows = []
