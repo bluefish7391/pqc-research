@@ -863,6 +863,7 @@ def render_scatter(
     output_html: str | None,
     histogram_bucket_sizes_s=None,
     histogram_time_source: str = "end",
+    scatter_x_source: str = "time",
     scatter_y_source: str = "duration",
 ):
     try:
@@ -880,13 +881,30 @@ def render_scatter(
     if histogram_time_source not in {"start", "end"}:
         sys.exit("ERROR: histogram_time_source must be 'start' or 'end'")
 
+    if scatter_x_source not in {"time", "duration"}:
+        sys.exit("ERROR: scatter_x_source must be 'time' or 'duration'")
+
     if scatter_y_source not in {"duration", "stream_span"}:
         sys.exit("ERROR: scatter_y_source must be 'duration' or 'stream_span'")
+
+    scatter_x_field = "relative_start_s" if scatter_x_source == "time" else "duration_ms"
+    scatter_x_label = (
+        "Time Since First Request Start (s)"
+        if scatter_x_source == "time"
+        else "Request Duration (ms)"
+    )
+    scatter_x_hover = "t=%{x:.6f}s" if scatter_x_source == "time" else "duration_x=%{x:.3f}ms"
 
     scatter_y_field = "duration_ms" if scatter_y_source == "duration" else "stream_span_ms"
     scatter_y_label = "Request Duration (ms)" if scatter_y_source == "duration" else "Stream Span (ms)"
     scatter_y_hover_label = "duration" if scatter_y_source == "duration" else "stream_span"
-    scatter_title_metric = "Request Duration" if scatter_y_source == "duration" else "Stream Span"
+    scatter_title_metric = (
+        "Request Duration by Time"
+        if scatter_x_source == "time" and scatter_y_source == "duration"
+        else "Request Duration vs Stream Span"
+        if scatter_x_source == "duration" and scatter_y_source == "stream_span"
+        else f"{scatter_y_label} by {scatter_x_label}"
+    )
 
     valid_bucket_sizes = [size for size in histogram_bucket_sizes_s if size > 0]
     if not valid_bucket_sizes:
@@ -901,7 +919,7 @@ def render_scatter(
     fig = make_subplots(
         rows=total_rows,
         cols=1,
-        shared_xaxes=True,
+        shared_xaxes=scatter_x_source == "time",
         row_heights=row_heights,
         vertical_spacing=0.03,
     )
@@ -932,7 +950,7 @@ def render_scatter(
         worker_points = [row for row in points if row["worker"] == worker]
         fig.add_trace(
             go.Scatter(
-                x=[row["relative_start_s"] for row in worker_points],
+                x=[row[scatter_x_field] for row in worker_points],
                 y=[row.get(scatter_y_field) for row in worker_points],
                 mode="markers",
                 name=f"worker_{worker}",
@@ -946,7 +964,7 @@ def render_scatter(
                     "syn_to_get=%{customdata[5]}<br>"
                     "get_to_end=%{customdata[6]}<br>"
                     "stream_span=%{customdata[7]}<br>"
-                    "t=%{x:.6f}s<br>"
+                    f"{scatter_x_hover}<br>"
                     f"{scatter_y_hover_label}=%{{y:.3f}}ms<extra></extra>"
                 ),
                 customdata=[
@@ -978,7 +996,15 @@ def render_scatter(
         )
 
     fig.update_yaxes(title_text=scatter_y_label, row=scatter_row, col=1)
-    fig.update_xaxes(title_text="Time Since First Request Start (s)", row=scatter_row, col=1)
+    fig.update_xaxes(title_text=scatter_x_label, row=scatter_row, col=1)
+
+    if scatter_x_source != "time":
+        histogram_axis_label = "Start" if histogram_time_source == "start" else "End"
+        fig.update_xaxes(
+            title_text=f"Time Since First Request {histogram_axis_label} (s)",
+            row=histogram_rows,
+            col=1,
+        )
 
     fig.update_layout(
         title=f"{scatter_title_metric} and Phase Breakdown by Worker",
@@ -1043,6 +1069,14 @@ def main():
             "Requires phase timing metadata from capture parsing."
         ),
     )
+    parser.add_argument(
+        "--duration-vs-stream-span",
+        action="store_true",
+        help=(
+            "Switch scatter axes to x=request duration and y=stream span. "
+            "Histograms remain time-based."
+        ),
+    )
     args = parser.parse_args()
 
     trial_dir = resolve_trial_dir(args.trial_dir)
@@ -1072,7 +1106,8 @@ def main():
         points,
         output_html,
         histogram_time_source="start" if args.histogram_start_time else "end",
-        scatter_y_source="stream_span" if args.y_stream_span else "duration",
+        scatter_x_source="duration" if args.duration_vs_stream_span else "time",
+        scatter_y_source="stream_span" if (args.y_stream_span or args.duration_vs_stream_span) else "duration",
     )
 
 
