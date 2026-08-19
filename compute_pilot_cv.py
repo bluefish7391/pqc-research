@@ -44,6 +44,7 @@ import argparse
 import csv
 import importlib
 import math
+import ntpath
 import re
 import statistics
 import sys
@@ -331,11 +332,24 @@ def repetitions_from_max_cv(max_cv):
 
 
 def resolve_collection_dir(collection_dir_arg: str) -> Path:
-    path = Path(collection_dir_arg)
-    if not path.is_absolute():
-        sys.exit(f"ERROR: collection directory must be an absolute path: {collection_dir_arg}")
+    raw = collection_dir_arg.strip()
 
-    collection_dir = path.resolve()
+    # Helpful message for Git Bash users: unescaped backslashes in a Windows path
+    # (e.g. C:\Work\pqc-research\pilot) can become C:Workpqc-researchpilot.
+    if re.match(r"^[A-Za-z]:[^\\/].+", raw):
+        sys.exit(
+            "ERROR: invalid Windows path format. In Git Bash, either use forward slashes "
+            "(e.g. C:/Work/pqc-research/pilot) or quote/escape backslashes "
+            "(e.g. 'C:\\\\Work\\\\pqc-research\\\\pilot')."
+        )
+
+    # Accept absolute paths in either Windows (C:\..., C:/..., UNC) or POSIX styles.
+    # Also accept relative paths and resolve them against the current working directory.
+    if ntpath.isabs(raw) or Path(raw).is_absolute():
+        collection_dir = Path(raw).resolve()
+    else:
+        collection_dir = (Path.cwd() / raw).resolve()
+
     if not collection_dir.is_dir():
         sys.exit(f"ERROR: collection directory not found: {collection_dir}")
     return collection_dir
@@ -343,7 +357,13 @@ def resolve_collection_dir(collection_dir_arg: str) -> Path:
 
 def main():
     parser = argparse.ArgumentParser(description="Compute per-cell latency CV across sweeps.")
-    parser.add_argument("collection_dir", help="Absolute path to the collection directory.")
+    parser.add_argument(
+        "collection_dir",
+        help=(
+            "Path to the collection directory (absolute or relative). "
+            "On Windows/Git Bash, prefer C:/... or quote backslash paths."
+        ),
+    )
     args = parser.parse_args()
 
     collection_dir = resolve_collection_dir(args.collection_dir)
