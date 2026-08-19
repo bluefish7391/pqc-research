@@ -260,7 +260,7 @@ def combine(
     stream_data["get_to_last_pkt_ms"] = stream_data["get_to_last_pkt_s"] * 1000
 
     result = requests_df.merge(
-        stream_data.drop(columns=["tcp.stream"]),
+        stream_data,
         on="request_id",
         how="left",
     )
