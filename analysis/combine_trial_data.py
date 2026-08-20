@@ -12,26 +12,33 @@ For a given trial directory (as produced by run_trial.sh), this script:
      per-user SSLKEYLOGFILE outputs under keylogs/), so tshark can decrypt
      the TLS 1.3 traffic in capture.pcap. If run_trial.sh already produced
      one, this step is a no-op.
-  2. Extracts, per TCP stream, the timestamp of the first and last packet
-     seen (used here as a simple proxy for handshake duration -- a rougher
-     stand-in for the SYN-to-Finished definition in the research plan).
-  3. Extracts, per TCP stream, the request ID from the decrypted HTTP GET
-     request's custom "Request-ID" header.
-  4. Loads and concatenates all worker_*_requests.csv files written by
+  2. Extracts per-packet timing and phase markers (source IP, TCP payload
+     length, TLS handshake-message type) for every packet in capture.pcap.
+  3. Extracts, per TCP stream, the request ID and send-time of the
+     decrypted HTTP GET request's custom "Request-ID" header.
+  4. Derives, per TCP stream, both a coarse 2-phase split (syn_to_get_s,
+     get_to_last_pkt_s) and a finer 5-phase split of the handshake and
+     response:
+       - tcp_handshake_s:     first packet -> ClientHello sent
+       - tls_negotiation_s:   ClientHello -> GET request sent
+       - ttfb_s:               GET request -> first response byte
+       - response_transfer_s: first response byte -> last data packet
+       - teardown_s:          last data packet -> last packet in stream
+     The fine-grained phases sum to their coarse counterparts
+     (tcp_handshake_s + tls_negotiation_s == syn_to_get_s, and
+     ttfb_s + response_transfer_s + teardown_s == get_to_last_pkt_s),
+     which is checked and reported as a sanity check on the markers.
+  5. Loads and concatenates all worker_*_requests.csv files written by
      locustfile.py.
-  5. Left-joins the requests data with the per-stream pcap timing data on
+  6. Left-joins the requests data with the per-stream phase data on
      request_id (so failed/timed-out requests with no matching stream are
      kept, flagged via a `matched` column, rather than silently dropped),
-     computes two phase-level latency columns -- syn_to_get_s (first packet
-     of the stream to the packet carrying the GET request) and
-     get_to_last_pkt_s (GET request to the stream's last packet) -- and
-     writes the result to combined_metrics.csv in the trial directory.
-     syn_to_get_s + get_to_last_pkt_s == pcap_duration_s for matched rows,
-     which is a useful sanity check on the join.
+     and writes the result to combined_metrics.csv in the trial directory.
 
 Usage:
     python3 combine_trial_data.py /absolute/path/to/trial_dir
     python3 combine_trial_data.py /absolute/path/to/trial_dir --output /some/other/path.csv
+    python3 combine_trial_data.py /absolute/path/to/trial_dir --server-ip 172.20.0.10
 
 Requires: tshark on PATH, pandas installed.
 """
@@ -91,7 +98,7 @@ def ensure_master_keylog(trial_dir: Path) -> Path:
     """
     master_keylog = trial_dir / "master_keylog.log"
     if master_keylog.exists():
-        print(f"[1/5] master_keylog.log already exists at {master_keylog}")
+        print(f"[1/6] master_keylog.log already exists at {master_keylog}")
         return master_keylog
 
     keylog_dir = trial_dir / "keylogs"
@@ -99,7 +106,7 @@ def ensure_master_keylog(trial_dir: Path) -> Path:
     if not keylog_files:
         die(f"No keylog files found in {keylog_dir}; cannot decrypt capture.pcap.")
 
-    print(f"[1/5] Building master_keylog.log from {len(keylog_files)} file(s) in {keylog_dir}")
+    print(f"[1/6] Building master_keylog.log from {len(keylog_files)} file(s) in {keylog_dir}")
     with open(master_keylog, "w") as out_f:
         for f in keylog_files:
             out_f.write(f.read_text())
@@ -119,21 +126,31 @@ def run_tshark(args: list) -> str:
     return result.stdout
 
 
-def extract_stream_timing(pcap_path: Path, keylog_path: Path) -> pd.DataFrame:
+def extract_stream_packets(pcap_path: Path, keylog_path: Path) -> pd.DataFrame:
     """
-    Returns a DataFrame with one row per TCP stream:
-        tcp.stream, first_pkt_time, last_pkt_time, pcap_duration_s
+    Returns a DataFrame with one row per packet in capture.pcap:
+        tcp.stream, frame.time_epoch, ip.src, tcp.len, tls.handshake.type
+
+    This raw, per-packet data feeds compute_phase_markers() below, which
+    derives both the coarse first/last-packet timestamps and the finer
+    phase-boundary markers (ClientHello time, first response-byte time,
+    last data-bearing packet time) used for the 5-way phase split.
     """
-    print("[2/5] Extracting per-stream packet timing from capture.pcap...")
+    print("[2/6] Extracting per-packet timing and phase markers from capture.pcap...")
     stdout = run_tshark([
         "-r", str(pcap_path),
         "-o", f"tls.keylog_file:{keylog_path}",
         "-T", "fields",
         "-e", "tcp.stream",
         "-e", "frame.time_epoch",
+        "-e", "ip.src",
+        "-e", "tcp.len",
+        "-e", "tls.handshake.type",
         "-E", "header=y",
         "-E", "separator=,",
         "-E", "quote=d",
+        "-E", "occurrence=a",
+        "-E", "aggregator=;",
     ])
 
     df = pd.read_csv(StringIO(stdout))
@@ -141,15 +158,78 @@ def extract_stream_timing(pcap_path: Path, keylog_path: Path) -> pd.DataFrame:
         die("tshark returned no packets for capture.pcap -- check the pcap file and keylog.")
 
     df["frame.time_epoch"] = df["frame.time_epoch"].astype(float)
+    df["tcp.len"] = pd.to_numeric(df["tcp.len"], errors="coerce").fillna(0)
 
-    grouped = (
-        df.groupby("tcp.stream")["frame.time_epoch"]
-        .agg(first_pkt_time="min", last_pkt_time="max")
-        .reset_index()
-    )
-    grouped["pcap_duration_s"] = grouped["last_pkt_time"] - grouped["first_pkt_time"]
+    return df
 
-    return grouped
+
+def compute_phase_markers(packets_df: pd.DataFrame, ids_df: pd.DataFrame, server_ip: str) -> pd.DataFrame:
+    """
+    Computes, per TCP stream, the packet-time markers needed for both the
+    coarse (SYN-to-GET / GET-to-last-packet) and fine-grained (5-way) phase
+    breakdown:
+        tcp.stream, first_pkt_time, last_pkt_time, pcap_duration_s,
+        clienthello_time, first_response_pkt_time, last_data_pkt_time
+
+    Marker definitions:
+      - first_pkt_time / last_pkt_time: earliest/latest packet in the
+        stream (unchanged from before).
+      - clienthello_time: earliest packet whose tls.handshake.type includes
+        1 (ClientHello) -- marks the end of the plain TCP handshake and the
+        start of TLS negotiation.
+      - first_response_pkt_time: earliest packet sourced from server_ip,
+        carrying a non-empty TCP payload, sent *after* that stream's GET
+        request -- marks first byte of the actual HTTP response, as
+        opposed to earlier TLS handshake bytes also sent by the server.
+      - last_data_pkt_time: latest packet in the stream carrying a
+        non-empty TCP payload -- marks the end of data transfer, before
+        any trailing FIN/ACK-only teardown packets.
+
+    A stream missing any of these markers (e.g. no ClientHello identified)
+    simply gets NaN in that column and downstream phase columns derived
+    from it -- reported by combine() rather than silently dropped.
+    """
+    print("[4/6] Deriving coarse and fine-grained phase markers per stream...")
+
+    get_times = ids_df.set_index("tcp.stream")["get_request_time"]
+    packets_df = packets_df.copy()
+    packets_df["get_request_time"] = packets_df["tcp.stream"].map(get_times)
+
+    def has_clienthello(field):
+        if not isinstance(field, str):
+            return False
+        return "1" in field.split(";")
+
+    is_clienthello = packets_df["tls.handshake.type"].apply(has_clienthello)
+
+    first_pkt_time = packets_df.groupby("tcp.stream")["frame.time_epoch"].min()
+    last_pkt_time = packets_df.groupby("tcp.stream")["frame.time_epoch"].max()
+    clienthello_time = packets_df[is_clienthello].groupby("tcp.stream")["frame.time_epoch"].min()
+
+    data_pkts = packets_df[packets_df["tcp.len"] > 0]
+    last_data_pkt_time = data_pkts.groupby("tcp.stream")["frame.time_epoch"].max()
+
+    response_pkts = data_pkts[
+        (data_pkts["ip.src"] == server_ip)
+        & (data_pkts["frame.time_epoch"] > data_pkts["get_request_time"])
+    ]
+    first_response_pkt_time = response_pkts.groupby("tcp.stream")["frame.time_epoch"].min()
+
+    # Combining Series with potentially different indices (e.g. some
+    # streams never had a ClientHello identified) into one DataFrame
+    # aligns on the union of indices automatically, filling NaN for any
+    # stream missing a given marker.
+    markers = pd.DataFrame({
+        "first_pkt_time": first_pkt_time,
+        "last_pkt_time": last_pkt_time,
+        "clienthello_time": clienthello_time,
+        "first_response_pkt_time": first_response_pkt_time,
+        "last_data_pkt_time": last_data_pkt_time,
+    }).reset_index()
+
+    markers["pcap_duration_s"] = markers["last_pkt_time"] - markers["first_pkt_time"]
+
+    return markers
 
 
 def extract_stream_request_ids(pcap_path: Path, keylog_path: Path) -> pd.DataFrame:
@@ -162,7 +242,7 @@ def extract_stream_request_ids(pcap_path: Path, keylog_path: Path) -> pd.DataFra
     the HTTP request on -- for a request this small (one header line, no
     body) that's effectively when the GET request was sent.
     """
-    print("[3/5] Extracting request IDs and request timing from decrypted HTTP requests...")
+    print("[3/6] Extracting request IDs and request timing from decrypted HTTP requests...")
     stdout = run_tshark([
         "-r", str(pcap_path),
         "-o", f"tls.keylog_file:{keylog_path}",
@@ -216,25 +296,33 @@ def load_requests(trial_dir: Path) -> pd.DataFrame:
     if not csv_files:
         die(f"No worker_*_requests.csv files found in {requests_dir}")
 
-    print(f"[4/5] Loading {len(csv_files)} requests CSV(s) from {requests_dir}")
+    print(f"[5/6] Loading {len(csv_files)} requests CSV(s) from {requests_dir}")
     dfs = [pd.read_csv(f) for f in csv_files]
     return pd.concat(dfs, ignore_index=True)
 
 
 def combine(
     requests_df: pd.DataFrame,
-    timing_df: pd.DataFrame,
+    markers_df: pd.DataFrame,
     ids_df: pd.DataFrame,
 ) -> pd.DataFrame:
     """
-    Joins stream timing + stream request IDs, then left-joins the result
-    onto the Locust requests data via request_id. Adds a `matched`
-    boolean column so failed/unmatched requests are visible rather than
-    silently dropped or silently blank.
-    """
-    print("[5/5] Joining requests data with pcap stream data...")
+    Joins per-stream phase markers with per-stream request IDs, then
+    left-joins the result onto the Locust requests data via request_id.
+    Adds a `matched` boolean column so failed/unmatched requests are
+    visible rather than silently dropped or silently blank.
 
-    stream_data = ids_df.merge(timing_df, on="tcp.stream", how="left")
+    Produces two levels of phase-level latency breakdown:
+      - Coarse (2-way): syn_to_get_s, get_to_last_pkt_s
+      - Fine   (5-way): tcp_handshake_s, tls_negotiation_s, ttfb_s,
+                         response_transfer_s, teardown_s
+    The fine columns should sum to their corresponding coarse column for
+    every stream where all markers were identified; this is checked below
+    and any mismatches are reported rather than silently accepted.
+    """
+    print("[6/6] Joining requests data with pcap stream data...")
+
+    stream_data = ids_df.merge(markers_df, on="tcp.stream", how="left")
 
     # More than one stream mapping to the same request_id would indicate a
     # real problem (ID collision, connection reuse) worth surfacing rather
@@ -246,21 +334,49 @@ def combine(
             f"TCP stream -- check for connection reuse or ID collisions."
         )
 
-    # Phase-level breakdown: syn_to_get_s covers connection setup + the TLS
-    # handshake, up to the moment the client's GET request was sent;
-    # get_to_last_pkt_s covers everything from there through the server's
-    # response and connection teardown. These two should sum to
-    # pcap_duration_s for every matched row.
+    # Coarse phase split: setup (SYN through the GET request being sent)
+    # vs. response (GET request through the stream's last packet).
     stream_data["syn_to_get_s"] = stream_data["get_request_time"] - stream_data["first_pkt_time"]
     stream_data["get_to_last_pkt_s"] = stream_data["last_pkt_time"] - stream_data["get_request_time"]
 
-    # Expose the same measurements in milliseconds for quick inspection and
-    # plot hover metadata without converting them repeatedly downstream.
-    stream_data["syn_to_get_ms"] = stream_data["syn_to_get_s"] * 1000
-    stream_data["get_to_last_pkt_ms"] = stream_data["get_to_last_pkt_s"] * 1000
+    # Fine-grained phase split.
+    stream_data["tcp_handshake_s"] = stream_data["clienthello_time"] - stream_data["first_pkt_time"]
+    stream_data["tls_negotiation_s"] = stream_data["get_request_time"] - stream_data["clienthello_time"]
+    stream_data["ttfb_s"] = stream_data["first_response_pkt_time"] - stream_data["get_request_time"]
+    stream_data["response_transfer_s"] = stream_data["last_data_pkt_time"] - stream_data["first_response_pkt_time"]
+    stream_data["teardown_s"] = stream_data["last_pkt_time"] - stream_data["last_data_pkt_time"]
+
+    missing_markers = stream_data[
+        stream_data[["clienthello_time", "first_response_pkt_time", "last_data_pkt_time"]].isna().any(axis=1)
+    ]
+    if not missing_markers.empty:
+        print(
+            f"  WARNING: {len(missing_markers)} stream(s) missing one or more fine-grained "
+            f"phase markers (ClientHello, first response packet, or last data packet not "
+            f"identified) -- their fine-grained phase columns will contain NaN."
+        )
+
+    # Sanity check: the fine-grained phases should sum to their coarse
+    # counterparts. NaN comparisons evaluate to False, so streams already
+    # missing markers are skipped here rather than double-reported.
+    TOLERANCE_S = 1e-6
+    setup_gap = (stream_data["tcp_handshake_s"] + stream_data["tls_negotiation_s"] - stream_data["syn_to_get_s"]).abs()
+    response_gap = (
+        stream_data["ttfb_s"] + stream_data["response_transfer_s"] + stream_data["teardown_s"]
+        - stream_data["get_to_last_pkt_s"]
+    ).abs()
+    bad_setup = stream_data[setup_gap > TOLERANCE_S]
+    bad_response = stream_data[response_gap > TOLERANCE_S]
+    if not bad_setup.empty:
+        print(f"  WARNING: {len(bad_setup)} stream(s) where tcp_handshake_s + tls_negotiation_s != syn_to_get_s.")
+    if not bad_response.empty:
+        print(
+            f"  WARNING: {len(bad_response)} stream(s) where "
+            f"ttfb_s + response_transfer_s + teardown_s != get_to_last_pkt_s."
+        )
 
     result = requests_df.merge(
-        stream_data,
+        stream_data.drop(columns=["tcp.stream"]),
         on="request_id",
         how="left",
     )
@@ -278,6 +394,16 @@ def main():
         default=None,
         help="Output CSV path (default: <trial_dir>/combined_metrics.csv)",
     )
+    parser.add_argument(
+        "--server-ip",
+        type=str,
+        default="172.20.0.10",
+        help=(
+            "IP address of the oqs-nginx server on ws-router-net, used to identify "
+            "response packets for the ttfb_s / response_transfer_s split "
+            "(default: 172.20.0.10, per docker-compose.yml)"
+        ),
+    )
     args = parser.parse_args()
 
     trial_dir = parse_path_arg(args.trial_dir).resolve()
@@ -291,11 +417,12 @@ def main():
     check_tshark_available()
 
     keylog_path = ensure_master_keylog(trial_dir)
-    timing_df = extract_stream_timing(pcap_path, keylog_path)
+    packets_df = extract_stream_packets(pcap_path, keylog_path)
     ids_df = extract_stream_request_ids(pcap_path, keylog_path)
+    markers_df = compute_phase_markers(packets_df, ids_df, args.server_ip)
     requests_df = load_requests(trial_dir)
 
-    result = combine(requests_df, timing_df, ids_df)
+    result = combine(requests_df, markers_df, ids_df)
 
     output_path = parse_path_arg(args.output).resolve() if args.output else (trial_dir / "combined_metrics.csv")
     result.to_csv(output_path, index=False)
