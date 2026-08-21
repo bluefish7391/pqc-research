@@ -49,6 +49,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 from io import StringIO
 from pathlib import Path
 
@@ -89,29 +90,32 @@ def check_tshark_available() -> None:
         die("tshark not found on PATH. Install it or run this on a host that has it.")
 
 
-def ensure_master_keylog(trial_dir: Path) -> Path:
+def create_temporary_keylog(trial_dir: Path) -> Path:
     """
-    Returns the path to trial_dir/master_keylog.log, creating it by
-    concatenating trial_dir/keylogs/* if it doesn't already exist.
-    (Mirrors generate_master_keylog() in debug.sh -- if that step already
-    ran as part of run_trial.sh, this is a no-op.)
+    Create a temporary combined keylog for tshark and return its path.
+    The caller owns cleanup of the returned file.
     """
-    master_keylog = trial_dir / "master_keylog.log"
-    if master_keylog.exists():
-        print(f"[1/6] master_keylog.log already exists at {master_keylog}")
-        return master_keylog
-
     keylog_dir = trial_dir / "keylogs"
-    keylog_files = sorted(keylog_dir.glob("*"))
+    keylog_files = sorted(keylog_dir.glob("*.log"))
     if not keylog_files:
         die(f"No keylog files found in {keylog_dir}; cannot decrypt capture.pcap.")
 
-    print(f"[1/6] Building master_keylog.log from {len(keylog_files)} file(s) in {keylog_dir}")
-    with open(master_keylog, "w") as out_f:
-        for f in keylog_files:
-            out_f.write(f.read_text())
+    print(f"[1/6] Building temporary keylog from {len(keylog_files)} file(s) in {keylog_dir}")
+    with tempfile.NamedTemporaryFile(
+        mode="w",
+        encoding="utf-8",
+        newline="\n",
+        prefix=".combine_trial_data_",
+        suffix=".log",
+        dir=trial_dir,
+        delete=False,
+    ) as out_f:
+        for index, keylog_file in enumerate(keylog_files):
+            if index:
+                out_f.write("\n")
+            out_f.write(keylog_file.read_text(encoding="utf-8", errors="ignore"))
 
-    return master_keylog
+    return Path(out_f.name)
 
 
 def run_tshark(args: list) -> str:
@@ -416,9 +420,12 @@ def main():
 
     check_tshark_available()
 
-    keylog_path = ensure_master_keylog(trial_dir)
-    packets_df = extract_stream_packets(pcap_path, keylog_path)
-    ids_df = extract_stream_request_ids(pcap_path, keylog_path)
+    keylog_path = create_temporary_keylog(trial_dir)
+    try:
+        packets_df = extract_stream_packets(pcap_path, keylog_path)
+        ids_df = extract_stream_request_ids(pcap_path, keylog_path)
+    finally:
+        keylog_path.unlink(missing_ok=True)
     markers_df = compute_phase_markers(packets_df, ids_df, args.server_ip)
     requests_df = load_requests(trial_dir)
 

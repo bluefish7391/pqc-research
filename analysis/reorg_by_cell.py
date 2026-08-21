@@ -3,8 +3,8 @@
 reorg_by_cell.py
 
 Reorganizes a trial collection directory into a sibling directory
-containing ONLY the derived per-repetition analysis outputs
-(combined_metrics.csv and master_keylog.log) for every trial, in the
+containing ONLY the derived per-repetition analysis output
+(combined_metrics.csv) for every trial, in the
 same cell -> repetition layout as the original.
 
 Expected input layout (as produced by run_matrix.sh / run_trial.sh):
@@ -23,21 +23,17 @@ Output layout (default: a sibling directory named "<COLLECTION_DIR>_by_cell"):
       <cell_name>/
         rep_<N>/
           combined_metrics.csv
-          master_keylog.log
 
 For each trial directory, this script invokes combine_trial_data.py
 (unmodified) to perform the actual pcap/CSV join, pointing its --output
-flag directly at the new location. combine_trial_data.py always writes
-master_keylog.log into the ORIGINAL trial directory (it has no flag to
-redirect that), so this script separately copies that file into the new
-location afterward.
+flag directly at the new location. Keylog material is used only through
+temporary files and is not retained in either directory.
 
 Raw trial data (capture.pcap, keylogs/, locust/requests/*.csv) is left
-in place under COLLECTION_DIR and is NOT duplicated into the new tree --
-only the two derived outputs are.
+in place under COLLECTION_DIR and is NOT duplicated into the new tree.
 
-A failed trial (nonzero exit from combine_trial_data.py, or a failure
-copying the keylog) intentionally leaves behind whatever partial output
+A failed trial (nonzero exit from combine_trial_data.py) intentionally
+leaves behind whatever partial output
 already exists in its rep_<N>/ directory rather than being cleaned up.
 This makes failures visible (an empty or half-populated rep_<N>/ folder)
 and means a later re-run without --force will only reprocess trials that
@@ -56,7 +52,6 @@ Requires: combine_trial_data.py (and, transitively, tshark + pandas).
 import argparse
 import datetime
 import re
-import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -86,8 +81,7 @@ def find_trials(collection_dir: Path, log):
     matching "<cell_name>_rep<N>".
 
     Any subdirectory that does NOT match this pattern is skipped and reported
-    via `log` rather than silently ignored -- an unexpected name usually means
-    something is worth double-checking (e.g. a manually renamed folder).
+    via `log` rather than silently ignored.
     """
     trials = []
     for cell_dir in visible_subdirs(collection_dir):
@@ -107,14 +101,14 @@ def find_trials(collection_dir: Path, log):
 
 
 def trial_already_done(dest: Path) -> bool:
-    """A trial counts as already-processed only if BOTH derived outputs are present."""
-    return (dest / "combined_metrics.csv").exists() and (dest / "master_keylog.log").exists()
+    """A trial counts as already-processed when its derived CSV is present."""
+    return (dest / "combined_metrics.csv").exists()
 
 
 def process_trial(trial_dir: Path, dest: Path, combine_script: Path, log):
     """
-    Runs combine_trial_data.py for one trial and copies its keylog into dest.
-    Raises RuntimeError with a descriptive message on any failure; the caller
+    Runs combine_trial_data.py for one trial.
+    Raises RuntimeError with a descriptive message on failure; the caller
     catches this per-trial so one bad trial doesn't abort the whole collection.
     """
     dest.mkdir(parents=True, exist_ok=True)
@@ -133,16 +127,6 @@ def process_trial(trial_dir: Path, dest: Path, combine_script: Path, log):
             f"combine_trial_data.py exited {result.returncode} for {trial_dir}\n"
             f"--- stderr (tail) ---\n{stderr_tail}"
         )
-
-    keylog_src = trial_dir / "master_keylog.log"
-    if not keylog_src.exists():
-        raise RuntimeError(
-            f"combine_trial_data.py succeeded but {keylog_src} was not found "
-            f"(expected it to create/reuse this file in the original trial dir)."
-        )
-
-    shutil.copy2(keylog_src, dest / "master_keylog.log")
-
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -211,7 +195,7 @@ def main():
             log(f"[{cell_name} / rep_{rep_number}] trial_dir={trial_dir}")
 
             if not args.force and trial_already_done(dest):
-                log("    SKIPPED (already has combined_metrics.csv and master_keylog.log)")
+                log("    SKIPPED (already has combined_metrics.csv)")
                 skipped += 1
                 log("")
                 continue
