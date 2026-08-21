@@ -61,6 +61,8 @@ def load_and_prepare(csv_path: Path) -> pd.DataFrame:
         "start_time_ns", "end_time_ns",
         "first_pkt_time", "last_pkt_time",
         "matched", "request_id",
+        "tcp_handshake_s", "tls_negotiation_s", "ttfb_s",
+        "response_transfer_s", "teardown_s",
     }
     missing = required_cols - set(df.columns)
     if missing:
@@ -87,6 +89,14 @@ def load_and_prepare(csv_path: Path) -> pd.DataFrame:
     # downstream analysis and per-point hover fields.
     df["syn_to_get_ms"] = df["syn_to_get_s"] * 1000
     df["get_to_last_pkt_ms"] = df["get_to_last_pkt_s"] * 1000
+    for phase in [
+        "tcp_handshake_s",
+        "tls_negotiation_s",
+        "ttfb_s",
+        "response_transfer_s",
+        "teardown_s",
+    ]:
+        df[f"{phase[:-1]}ms"] = df[phase] * 1000
 
     return df
 
@@ -99,6 +109,11 @@ def make_plot(df: pd.DataFrame, add_reference_line: bool):
             "exception",
             "syn_to_get_ms",
             "get_to_last_pkt_ms",
+            "tcp_handshake_ms",
+            "tls_negotiation_ms",
+            "ttfb_ms",
+            "response_transfer_ms",
+            "teardown_ms",
         ] if c in df.columns
     ]
 
