@@ -340,15 +340,17 @@ def combine(
 
     # Coarse phase split: setup (SYN through the GET request being sent)
     # vs. response (GET request through the stream's last packet).
-    stream_data["syn_to_get_s"] = stream_data["get_request_time"] - stream_data["first_pkt_time"]
-    stream_data["get_to_last_pkt_s"] = stream_data["last_pkt_time"] - stream_data["get_request_time"]
+    # All phase durations are written in milliseconds to keep the CSV readable
+    # and prevent tiny values from being rendered in scientific notation.
+    stream_data["syn_to_get_s"] = (stream_data["get_request_time"] - stream_data["first_pkt_time"]) * 1000
+    stream_data["get_to_last_pkt_s"] = (stream_data["last_pkt_time"] - stream_data["get_request_time"]) * 1000
 
     # Fine-grained phase split.
-    stream_data["tcp_handshake_s"] = stream_data["clienthello_time"] - stream_data["first_pkt_time"]
-    stream_data["tls_negotiation_s"] = stream_data["get_request_time"] - stream_data["clienthello_time"]
-    stream_data["ttfb_s"] = stream_data["first_response_pkt_time"] - stream_data["get_request_time"]
-    stream_data["response_transfer_s"] = stream_data["last_data_pkt_time"] - stream_data["first_response_pkt_time"]
-    stream_data["teardown_s"] = stream_data["last_pkt_time"] - stream_data["last_data_pkt_time"]
+    stream_data["tcp_handshake_s"] = (stream_data["clienthello_time"] - stream_data["first_pkt_time"]) * 1000
+    stream_data["tls_negotiation_s"] = (stream_data["get_request_time"] - stream_data["clienthello_time"]) * 1000
+    stream_data["ttfb_s"] = (stream_data["first_response_pkt_time"] - stream_data["get_request_time"]) * 1000
+    stream_data["response_transfer_s"] = (stream_data["last_data_pkt_time"] - stream_data["first_response_pkt_time"]) * 1000
+    stream_data["teardown_s"] = (stream_data["last_pkt_time"] - stream_data["last_data_pkt_time"]) * 1000
 
     missing_markers = stream_data[
         stream_data[["clienthello_time", "first_response_pkt_time", "last_data_pkt_time"]].isna().any(axis=1)
@@ -363,14 +365,16 @@ def combine(
     # Sanity check: the fine-grained phases should sum to their coarse
     # counterparts. NaN comparisons evaluate to False, so streams already
     # missing markers are skipped here rather than double-reported.
-    TOLERANCE_S = 1e-6
+    # Phase values are expressed in milliseconds here, so the tolerance is
+    # scaled to the same unit.
+    TOLERANCE_MS = 1e-6
     setup_gap = (stream_data["tcp_handshake_s"] + stream_data["tls_negotiation_s"] - stream_data["syn_to_get_s"]).abs()
     response_gap = (
         stream_data["ttfb_s"] + stream_data["response_transfer_s"] + stream_data["teardown_s"]
         - stream_data["get_to_last_pkt_s"]
     ).abs()
-    bad_setup = stream_data[setup_gap > TOLERANCE_S]
-    bad_response = stream_data[response_gap > TOLERANCE_S]
+    bad_setup = stream_data[setup_gap > TOLERANCE_MS]
+    bad_response = stream_data[response_gap > TOLERANCE_MS]
     if not bad_setup.empty:
         print(f"  WARNING: {len(bad_setup)} stream(s) where tcp_handshake_s + tls_negotiation_s != syn_to_get_s.")
     if not bad_response.empty:
@@ -380,7 +384,7 @@ def combine(
         )
 
     result = requests_df.merge(
-        stream_data.drop(columns=["tcp.stream"]),
+        stream_data.rename(columns={"tcp.stream": "pcap_stream_id"}),
         on="request_id",
         how="left",
     )
@@ -432,7 +436,7 @@ def main():
     result = combine(requests_df, markers_df, ids_df)
 
     output_path = parse_path_arg(args.output).resolve() if args.output else (trial_dir / "combined_metrics.csv")
-    result.to_csv(output_path, index=False)
+    result.to_csv(output_path, index=False, float_format="%.12f")
 
     total = len(result)
     matched = int(result["matched"].sum())
