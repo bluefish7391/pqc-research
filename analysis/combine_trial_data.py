@@ -16,17 +16,17 @@ For a given trial directory (as produced by run_trial.sh), this script:
      length, TLS handshake-message type) for every packet in capture.pcap.
   3. Extracts, per TCP stream, the request ID and send-time of the
      decrypted HTTP GET request's custom "Request-ID" header.
-  4. Derives, per TCP stream, both a coarse 2-phase split (syn_to_get_s,
-     get_to_last_pkt_s) and a finer 5-phase split of the handshake and
+  4. Derives, per TCP stream, both a coarse 2-phase split (syn_to_get_ms,
+     get_to_last_pkt_ms) and a finer 5-phase split of the handshake and
      response:
-       - tcp_handshake_s:     first packet -> ClientHello sent
-       - tls_negotiation_s:   ClientHello -> GET request sent
-       - ttfb_s:               GET request -> first response byte
-       - response_transfer_s: first response byte -> last data packet
-       - teardown_s:          last data packet -> last packet in stream
+       - tcp_handshake_ms:     first packet -> ClientHello sent
+       - tls_negotiation_ms:   ClientHello -> GET request sent
+       - ttfb_ms:               GET request -> first response byte
+       - response_transfer_ms: first response byte -> last data packet
+       - teardown_ms:          last data packet -> last packet in stream
      The fine-grained phases sum to their coarse counterparts
-     (tcp_handshake_s + tls_negotiation_s == syn_to_get_s, and
-     ttfb_s + response_transfer_s + teardown_s == get_to_last_pkt_s),
+     (tcp_handshake_ms + tls_negotiation_ms == syn_to_get_ms, and
+     ttfb_ms + response_transfer_ms + teardown_ms == get_to_last_pkt_ms),
      which is checked and reported as a sanity check on the markers.
   5. Loads and concatenates all worker_*_requests.csv files written by
      locustfile.py.
@@ -317,9 +317,9 @@ def combine(
     visible rather than silently dropped or silently blank.
 
     Produces two levels of phase-level latency breakdown:
-      - Coarse (2-way): syn_to_get_s, get_to_last_pkt_s
-      - Fine   (5-way): tcp_handshake_s, tls_negotiation_s, ttfb_s,
-                         response_transfer_s, teardown_s
+      - Coarse (2-way): syn_to_get_ms, get_to_last_pkt_ms
+      - Fine   (5-way): tcp_handshake_ms, tls_negotiation_ms, ttfb_ms,
+                         response_transfer_ms, teardown_ms
     The fine columns should sum to their corresponding coarse column for
     every stream where all markers were identified; this is checked below
     and any mismatches are reported rather than silently accepted.
@@ -340,17 +340,17 @@ def combine(
 
     # Coarse phase split: setup (SYN through the GET request being sent)
     # vs. response (GET request through the stream's last packet).
-    # All phase durations are written in milliseconds to keep the CSV readable
+    # All phase durations are exported in milliseconds to keep the CSV readable
     # and prevent tiny values from being rendered in scientific notation.
-    stream_data["syn_to_get_s"] = (stream_data["get_request_time"] - stream_data["first_pkt_time"]) * 1000
-    stream_data["get_to_last_pkt_s"] = (stream_data["last_pkt_time"] - stream_data["get_request_time"]) * 1000
+    stream_data["syn_to_get_ms"] = (stream_data["get_request_time"] - stream_data["first_pkt_time"]) * 1000
+    stream_data["get_to_last_pkt_ms"] = (stream_data["last_pkt_time"] - stream_data["get_request_time"]) * 1000
 
     # Fine-grained phase split.
-    stream_data["tcp_handshake_s"] = (stream_data["clienthello_time"] - stream_data["first_pkt_time"]) * 1000
-    stream_data["tls_negotiation_s"] = (stream_data["get_request_time"] - stream_data["clienthello_time"]) * 1000
-    stream_data["ttfb_s"] = (stream_data["first_response_pkt_time"] - stream_data["get_request_time"]) * 1000
-    stream_data["response_transfer_s"] = (stream_data["last_data_pkt_time"] - stream_data["first_response_pkt_time"]) * 1000
-    stream_data["teardown_s"] = (stream_data["last_pkt_time"] - stream_data["last_data_pkt_time"]) * 1000
+    stream_data["tcp_handshake_ms"] = (stream_data["clienthello_time"] - stream_data["first_pkt_time"]) * 1000
+    stream_data["tls_negotiation_ms"] = (stream_data["get_request_time"] - stream_data["clienthello_time"]) * 1000
+    stream_data["ttfb_ms"] = (stream_data["first_response_pkt_time"] - stream_data["get_request_time"]) * 1000
+    stream_data["response_transfer_ms"] = (stream_data["last_data_pkt_time"] - stream_data["first_response_pkt_time"]) * 1000
+    stream_data["teardown_ms"] = (stream_data["last_pkt_time"] - stream_data["last_data_pkt_time"]) * 1000
 
     missing_markers = stream_data[
         stream_data[["clienthello_time", "first_response_pkt_time", "last_data_pkt_time"]].isna().any(axis=1)
@@ -368,19 +368,19 @@ def combine(
     # Phase values are expressed in milliseconds here, so the tolerance is
     # scaled to the same unit.
     TOLERANCE_MS = 1e-6
-    setup_gap = (stream_data["tcp_handshake_s"] + stream_data["tls_negotiation_s"] - stream_data["syn_to_get_s"]).abs()
+    setup_gap = (stream_data["tcp_handshake_ms"] + stream_data["tls_negotiation_ms"] - stream_data["syn_to_get_ms"]).abs()
     response_gap = (
-        stream_data["ttfb_s"] + stream_data["response_transfer_s"] + stream_data["teardown_s"]
-        - stream_data["get_to_last_pkt_s"]
+        stream_data["ttfb_ms"] + stream_data["response_transfer_ms"] + stream_data["teardown_ms"]
+        - stream_data["get_to_last_pkt_ms"]
     ).abs()
     bad_setup = stream_data[setup_gap > TOLERANCE_MS]
     bad_response = stream_data[response_gap > TOLERANCE_MS]
     if not bad_setup.empty:
-        print(f"  WARNING: {len(bad_setup)} stream(s) where tcp_handshake_s + tls_negotiation_s != syn_to_get_s.")
+        print(f"  WARNING: {len(bad_setup)} stream(s) where tcp_handshake_ms + tls_negotiation_ms != syn_to_get_ms.")
     if not bad_response.empty:
         print(
             f"  WARNING: {len(bad_response)} stream(s) where "
-            f"ttfb_s + response_transfer_s + teardown_s != get_to_last_pkt_s."
+            f"ttfb_ms + response_transfer_ms + teardown_ms != get_to_last_pkt_ms."
         )
 
     result = requests_df.merge(
@@ -408,7 +408,7 @@ def main():
         default="172.20.0.10",
         help=(
             "IP address of the oqs-nginx server on ws-router-net, used to identify "
-            "response packets for the ttfb_s / response_transfer_s split "
+            "response packets for the ttfb_ms / response_transfer_ms split "
             "(default: 172.20.0.10, per docker-compose.yml)"
         ),
     )

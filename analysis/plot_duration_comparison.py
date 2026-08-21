@@ -61,15 +61,20 @@ def load_and_prepare(csv_path: Path) -> pd.DataFrame:
         "start_time_ns", "end_time_ns",
         "first_pkt_time", "last_pkt_time",
         "matched", "request_id",
-        "tcp_handshake_s", "tls_negotiation_s", "ttfb_s",
-        "response_transfer_s", "teardown_s",
+        "tcp_handshake_ms", "tls_negotiation_ms", "ttfb_ms",
+        "response_transfer_ms", "teardown_ms",
     }
     missing = required_cols - set(df.columns)
     if missing:
         die(f"{csv_path} is missing expected column(s): {sorted(missing)}")
 
-    if not {"syn_to_get_s", "get_to_last_pkt_s"}.issubset(df.columns):
-        die(f"{csv_path} is missing phase-duration columns: syn_to_get_s and get_to_last_pkt_s")
+    legacy_phase_columns = {"syn_to_get_s", "get_to_last_pkt_s"}
+    if not {"syn_to_get_ms", "get_to_last_pkt_ms"}.issubset(df.columns):
+        if legacy_phase_columns.issubset(df.columns):
+            df["syn_to_get_ms"] = df["syn_to_get_s"] * 1000
+            df["get_to_last_pkt_ms"] = df["get_to_last_pkt_s"] * 1000
+        else:
+            die(f"{csv_path} is missing phase-duration columns: syn_to_get_ms and get_to_last_pkt_ms")
 
     total = len(df)
     df = df[df["matched"] == True].copy()  # noqa: E712 (matched is a real bool column)
@@ -85,18 +90,23 @@ def load_and_prepare(csv_path: Path) -> pd.DataFrame:
     # first_pkt_time / last_pkt_time are epoch seconds (float) -> ms
     df["pcap_duration_ms"] = (df["last_pkt_time"] - df["first_pkt_time"]) * 1000
 
-    # Keep both the original second-based columns and millisecond versions for
-    # downstream analysis and per-point hover fields.
-    df["syn_to_get_ms"] = df["syn_to_get_s"] * 1000
-    df["get_to_last_pkt_ms"] = df["get_to_last_pkt_s"] * 1000
+    # combined_metrics.csv stores the phase durations in milliseconds already.
+    # Keep explicit ms columns for downstream analysis and hover text.
+    if "syn_to_get_ms" not in df.columns:
+        df["syn_to_get_ms"] = df["syn_to_get_s"] * 1000
+    if "get_to_last_pkt_ms" not in df.columns:
+        df["get_to_last_pkt_ms"] = df["get_to_last_pkt_s"] * 1000
     for phase in [
-        "tcp_handshake_s",
-        "tls_negotiation_s",
-        "ttfb_s",
-        "response_transfer_s",
-        "teardown_s",
+        "tcp_handshake_ms",
+        "tls_negotiation_ms",
+        "ttfb_ms",
+        "response_transfer_ms",
+        "teardown_ms",
     ]:
-        df[f"{phase[:-1]}ms"] = df[phase] * 1000
+        if phase not in df.columns:
+            legacy_name = phase.replace("_ms", "_s")
+            if legacy_name in df.columns:
+                df[phase] = df[legacy_name] * 1000
 
     return df
 
@@ -105,6 +115,7 @@ def make_plot(df: pd.DataFrame, add_reference_line: bool):
     hover_cols = [
         c for c in [
             "request_id",
+            "pcap_stream_id",
             "success",
             "exception",
             "syn_to_get_ms",
