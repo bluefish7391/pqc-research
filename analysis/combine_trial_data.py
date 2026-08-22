@@ -33,7 +33,9 @@ For a given trial directory (as produced by run_trial.sh), this script:
   6. Left-joins the requests data with the per-stream phase data on
      request_id (so failed/timed-out requests with no matching stream are
      kept, flagged via a `matched` column, rather than silently dropped),
-     and writes the result to combined_metrics.csv in the trial directory.
+      and writes the result to combined_metrics.csv in the trial directory.
+      It also writes unmatched_streams.log with TCP stream numbers from the
+      pcap whose request IDs were not present in the Locust request data.
 
 Usage:
     python3 combine_trial_data.py /absolute/path/to/trial_dir
@@ -393,6 +395,28 @@ def combine(
     return result
 
 
+def write_unmatched_stream_log(
+    output_path: Path,
+    requests_df: pd.DataFrame,
+    ids_df: pd.DataFrame,
+) -> Path:
+    """Write TCP stream numbers whose pcap request IDs were not in Locust data."""
+    request_ids = set(requests_df["request_id"].dropna().astype(str))
+    unmatched_streams = (
+        ids_df.loc[~ids_df["request_id"].astype(str).isin(request_ids), "tcp.stream"]
+        .dropna()
+        .astype(int)
+        .drop_duplicates()
+        .sort_values()
+    )
+    log_path = output_path.with_name("unmatched_streams.log")
+    log_path.write_text(
+        "".join(f"{stream}\n" for stream in unmatched_streams),
+        encoding="utf-8",
+    )
+    return log_path
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("trial_dir", type=str, help="Absolute path to a trial directory")
@@ -437,11 +461,14 @@ def main():
 
     output_path = parse_path_arg(args.output).resolve() if args.output else (trial_dir / "combined_metrics.csv")
     result.to_csv(output_path, index=False, float_format="%.12f")
+    unmatched_log_path = write_unmatched_stream_log(output_path, requests_df, ids_df)
 
     total = len(result)
     matched = int(result["matched"].sum())
     rate = matched / total if total else 0.0
     print(f"\nWrote {output_path}")
+    unmatched_count = len(unmatched_log_path.read_text(encoding="utf-8").splitlines())
+    print(f"Wrote {unmatched_log_path} ({unmatched_count} unmatched stream(s))")
     print(f"{matched}/{total} requests matched to a pcap stream ({rate:.1%})")
 
 
