@@ -16,14 +16,13 @@ init_paths() {
   NGINX_TMPL="${PROJECT_DIR}/nginx/nginx.conf.tmpl"
   NGINX_CONF="${PROJECT_DIR}/nginx/nginx.conf"
 
-  DATA_DIR="${PROJECT_DIR}/data"
+  DATA_DIR="/run/media/brian/new-partition/data"
 
   COLLECTION_NAME="$(resolve_collection_dir)"
   COLLECTION_DIR="${DATA_DIR}/${COLLECTION_NAME}"
   MAIN_LOG_FILE="${COLLECTION_DIR}/run_matrix.log"
 
-  SWEEP_NAME="sweep_1" # Updated on every sweep
-  export SWEEP_DIR="${COLLECTION_DIR}/${SWEEP_NAME}"
+  # CELL_DIR is set per-cell inside the main sweep loop, not here.
 
   # Create untracked output directories/files so fresh clones can run immediately.
   mkdir -p "${COLLECTION_DIR}"
