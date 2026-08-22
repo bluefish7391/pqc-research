@@ -34,9 +34,10 @@ For a given trial directory (as produced by run_trial.sh), this script:
      request_id (so failed/timed-out requests with no matching stream are
      kept, flagged via a `matched` column, rather than silently dropped),
       and writes the result to combined_metrics.csv in the trial directory.
-      It also writes unmatched_streams.log with TCP stream numbers from the
-      pcap whose request IDs were not present in the Locust request data.
-
+     It also writes unmatched_streams.log with TCP stream numbers seen in
+     the pcap that never yielded a decrypted, Request-ID-tagged HTTP
+     request (e.g. failed/reset handshakes) -- distinct from requests that
+     never matched a stream, which have no stream number at all.
 Usage:
     python3 combine_trial_data.py /absolute/path/to/trial_dir
     python3 combine_trial_data.py /absolute/path/to/trial_dir --output /some/other/path.csv
@@ -397,13 +398,13 @@ def combine(
 
 def write_unmatched_stream_log(
     output_path: Path,
-    requests_df: pd.DataFrame,
+    markers_df: pd.DataFrame,
     ids_df: pd.DataFrame,
 ) -> Path:
-    """Write TCP stream numbers whose pcap request IDs were not in Locust data."""
-    request_ids = set(requests_df["request_id"].dropna().astype(str))
+    """Write TCP stream numbers seen in the pcap that never yielded a decrypted request."""
+    matched_streams = set(ids_df["tcp.stream"].dropna().astype(int))
     unmatched_streams = (
-        ids_df.loc[~ids_df["request_id"].astype(str).isin(request_ids), "tcp.stream"]
+        markers_df.loc[~markers_df["tcp.stream"].astype(int).isin(matched_streams), "tcp.stream"]
         .dropna()
         .astype(int)
         .drop_duplicates()
@@ -461,7 +462,7 @@ def main():
 
     output_path = parse_path_arg(args.output).resolve() if args.output else (trial_dir / "combined_metrics.csv")
     result.to_csv(output_path, index=False, float_format="%.12f")
-    unmatched_log_path = write_unmatched_stream_log(output_path, requests_df, ids_df)
+    unmatched_log_path = write_unmatched_stream_log(output_path, markers_df, ids_df)
 
     total = len(result)
     matched = int(result["matched"].sum())
