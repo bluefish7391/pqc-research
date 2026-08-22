@@ -68,8 +68,9 @@ Usage:
 
 Outputs (written as siblings of <by_cell_dir> by default):
     <by_cell_dir_name>_cv_results.csv   -- one row per cell: avg_p50_ms,
-                                            avg_p95_ms, avg_p99_ms, their
-                                            CVs, and recommended_repetitions
+                                            avg_p95_ms, avg_p99_ms, per-trial
+                                            percentile lists, their CVs, and
+                                            recommended_repetitions
     <by_cell_dir_name>_cv_warnings.log  -- one line per (cell, rep) that
                                             fell short of
                                             ANALYSIS_HANDSHAKE_TARGET
@@ -475,7 +476,7 @@ def main():
         writer = csv.writer(f)
         header = ["cell"]
         for p in percentile_labels:
-            header += [f"avg_{p}_ms", f"{p}_cv"]
+            header += [f"avg_{p}_ms", f"{p}_values_ms", f"{p}_cv"]
         header += ["recommended_repetitions"]
         writer.writerow(header)
 
@@ -487,6 +488,7 @@ def main():
                 mean_val = statistics.mean(values) if values else None
                 cv_val = cv(values)
                 row.append(f"{mean_val:.3f}" if mean_val is not None else "NA")
+                row.append(";".join(f"{v:.3f}" for v in values) if values else "NA")
                 row.append(f"{cv_val:.4f}" if cv_val is not None else "NA")
                 if cv_val is not None:
                     cell_cvs.append(cv_val)
