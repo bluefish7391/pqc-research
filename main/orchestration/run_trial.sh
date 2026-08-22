@@ -54,6 +54,12 @@ pin_locust_workers_to_cores() {
   done
 }
 
+get_rx_dropped() {
+  local iface="$1"
+  docker compose exec -T -u root router sh -c "ip -s link show '${iface}'" \
+    | awk '/^ *RX:/{getline; print $4; exit}'
+}
+
 run_one_combination() {
   local kem_label="$1"
   local kem_value="$2"
@@ -112,6 +118,9 @@ run_one_combination() {
     sleep 0.1
     elapsed=$((elapsed + 1))
   done
+
+  local rx_dropped_before
+  rx_dropped_before="$(get_rx_dropped "${NGINX_IFACE}")"
 
   local container_stats_dir="${trial_dir}/container_stats"
   mkdir -p "${container_stats_dir}"
@@ -229,6 +238,22 @@ run_one_combination() {
   kill "${SAMPLER_PID}" 2>/dev/null || true
   pkill -P "${SAMPLER_PID}" 2>/dev/null || true
   wait "${SAMPLER_PID}" 2>/dev/null || true
+
+  local rx_dropped_after
+  rx_dropped_after="$(get_rx_dropped "${NGINX_IFACE}")"
+  local rx_dropped_diff=$(( rx_dropped_after - rx_dropped_before ))
+
+  if (( rx_dropped_diff > 0 )); then
+    log "WARNING: ${rx_dropped_diff} packet(s) dropped at the router's ${NGINX_IFACE} RX queue during capture for ${run_id} (before=${rx_dropped_before}, after=${rx_dropped_after})."
+  else
+    log "No RX drops detected on ${NGINX_IFACE} during capture for ${run_id}."
+  fi
+
+  local capture_drop_log="${CELL_DIR}/capture_drop_stats.csv"
+  if [ ! -f "${capture_drop_log}" ]; then
+    echo "run_id,rx_dropped_before,rx_dropped_after,rx_dropped_diff" > "${capture_drop_log}"
+  fi
+  echo "${run_id},${rx_dropped_before},${rx_dropped_after},${rx_dropped_diff}" >> "${capture_drop_log}"
 
   # Terminate the tshark monitor inside the container cleanly by sending a SIGINT signal, which allows tshark to flush its buffers 
   # and write the pcap file properly. This in turn kills the docker compose exec command, which is why the wait command is used to
