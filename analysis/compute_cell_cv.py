@@ -3,7 +3,7 @@
 compute_cell_cv.py
 
 For a directory produced by reorg_by_cell.py (cell-first layout, one
-combined_metrics.csv per repetition), compute the coefficient of variation
+pcap_stream_metrics.csv per repetition), compute the coefficient of variation
 (CV = stddev/mean) of P50/P95/P99 handshake latency *across repetitions*,
 for each cell, and the number of repetitions recommended by a power
 analysis on the worst-case CV.
@@ -13,39 +13,16 @@ Expected input layout (as produced by reorg_by_cell.py):
     BY_CELL_DIR/
       <cell_name>/
         rep_<N>/
-          combined_metrics.csv
-          master_keylog.log
+          pcap_stream_metrics.csv
         ...
       ...
 
 Per-(cell, rep) processing:
-  1. Load combined_metrics.csv (one row per Locust request, already joined
-     with per-TCP-stream packet-capture markers by combine_trial_data.py).
-  2. Latency is the "stream span": pcap_duration_s (= last_pkt_time -
-     first_pkt_time, i.e. the packet-capture-derived duration of that
-     request's TCP stream) converted to milliseconds. This is used instead
-     of the Locust-recorded response_time_ms because response_time_ms
-     includes openssl-subprocess spawn overhead on top of the actual
-     network/handshake time (see research_plan_2.md, "Subprocess-based
-     client" limitation).
-  3. Determine t_start (min first_pkt_time) and t_end (max last_pkt_time)
-     across all MATCHED rows (successes + failures) -- matching the
-     "trial-activity-based, not success-only" boundary philosophy of the
-     original pilot-CV script, but bounded to what the packet capture
-     actually saw, since first_pkt_time/last_pkt_time only exist for rows
-     that joined to a TCP stream. first_pkt_time/last_pkt_time are epoch
-     seconds (floats), NOT nanoseconds -- WARMUP_SEC/COOLDOWN_SEC are
-     added/subtracted directly, with no *1e9 conversion.
+  1. Load pcap_stream_metrics.csv (one row per TCP stream).
+  2. Use stream_span_ms as the latency value.
+  3. Determine t_start and t_end from all rows with valid packet timestamps.
   4. Keep rows where:
-       - success == "False"   (NOTE: this column is inverted in the source
-         data -- "False" means the request actually succeeded, see
-         locustfile.py's log_request_to_csv, which writes
-         `exception is not None` into the success field. This column is
-         carried through unchanged by combine_trial_data.py.)
-       - matched == True, and first_pkt_time/last_pkt_time/pcap_duration_s
-         are all present (a completed request that never joined to a pcap
-         stream has no stream-span latency to compute -- these are counted
-         separately as "unmatched" rather than silently dropped)
+             - first_pkt_time/last_pkt_time/stream_span_ms are present
        - first_pkt_time >= t_start + WARMUP_SEC
        - last_pkt_time  <= t_end   - COOLDOWN_SEC
   5. Sort by first_pkt_time; if fewer than ANALYSIS_HANDSHAKE_TARGET rows
@@ -95,7 +72,7 @@ COOLDOWN_SEC = 10        # seconds before trial end to discard (pcap-time)
 ANALYSIS_HANDSHAKE_TARGET = 10_000  # handshakes used for percentile analysis
 PERCENTILES = (("p50", 50.0), ("p95", 95.0), ("p99", 99.0))
 REP_DIR_RE = re.compile(r"^rep_(?P<num>\d+)$")
-REQUIRED_COLUMNS = {"success", "matched", "first_pkt_time", "last_pkt_time", "pcap_duration_s"}
+REQUIRED_COLUMNS = {"first_pkt_time", "last_pkt_time", "stream_span_ms"}
 RELATIVE_EFFECT_SIZE = 0.10  # detectable mean shift as a fraction of baseline mean
 ALPHA = 0.0167
 POWER = 0.90
@@ -180,11 +157,11 @@ def parse_float(value):
 
 def load_rep_rows(rep_dir: Path):
     """
-    Loads combined_metrics.csv for one (cell, rep) and returns a list of
+    Loads pcap_stream_metrics.csv for one (cell, rep) and returns a list of
     dicts with the fields needed for filtering/latency, or None if the
     file is missing entirely (treated as a failed/incomplete trial).
     """
-    csv_path = rep_dir / "combined_metrics.csv"
+    csv_path = rep_dir / "pcap_stream_metrics.csv"
     if not csv_path.is_file():
         return None
 
@@ -200,11 +177,9 @@ def load_rep_rows(rep_dir: Path):
         for row in reader:
             rows.append(
                 {
-                    "success": row.get("success", ""),
-                    "matched": row.get("matched", "").strip().lower() == "true",
                     "first_pkt_time": parse_float(row.get("first_pkt_time")),
                     "last_pkt_time": parse_float(row.get("last_pkt_time")),
-                    "pcap_duration_s": parse_float(row.get("pcap_duration_s")),
+                    "stream_span_ms": parse_float(row.get("stream_span_ms")),
                 }
             )
     return rows
@@ -232,10 +207,9 @@ def compute_trial_percentiles(rows, percentile_specs):
 
     def has_stream_data(r):
         return (
-            r["matched"]
-            and r["first_pkt_time"] is not None
+            r["first_pkt_time"] is not None
             and r["last_pkt_time"] is not None
-            and r["pcap_duration_s"] is not None
+            and r["stream_span_ms"] is not None
         )
 
     # Trial-boundary reference points: all rows (success + failure) that
@@ -244,8 +218,7 @@ def compute_trial_percentiles(rows, percentile_specs):
     boundary_rows = [r for r in rows if has_stream_data(r)]
     if not boundary_rows:
         counts = dict(zero_counts)
-        counts["completed_count"] = sum(1 for r in rows if r["success"] == "False")
-        counts["unmatched_count"] = counts["completed_count"]
+        counts["completed_count"] = len(rows)
         return None, counts
 
     t_start = min(r["first_pkt_time"] for r in boundary_rows)
@@ -253,7 +226,7 @@ def compute_trial_percentiles(rows, percentile_specs):
     warmup_cutoff = t_start + WARMUP_SEC
     cooldown_cutoff = t_end - COOLDOWN_SEC
 
-    completed = [r for r in rows if r["success"] == "False"]
+    completed = rows
     completed_matched = [r for r in completed if has_stream_data(r)]
     unmatched_count = len(completed) - len(completed_matched)
 
@@ -282,7 +255,7 @@ def compute_trial_percentiles(rows, percentile_specs):
         if counts["eligible_count"] >= ANALYSIS_HANDSHAKE_TARGET
         else eligible
     )
-    latencies_ms = [r["pcap_duration_s"] * 1000.0 for r in window]
+    latencies_ms = [r["stream_span_ms"] for r in window]
 
     result = {label: percentile(latencies_ms, pct) for label, pct in percentile_specs}
     return result, counts
@@ -456,8 +429,8 @@ def main():
         else:
             f.write(
                 f"(cell, rep) combinations falling short of ANALYSIS_HANDSHAKE_TARGET="
-                f"{ANALYSIS_HANDSHAKE_TARGET} eligible handshakes (after warmup={WARMUP_SEC}s, "
-                f"cooldown={COOLDOWN_SEC}s, success-only + matched-only filter):\n"
+                f"{ANALYSIS_HANDSHAKE_TARGET} eligible streams (after warmup={WARMUP_SEC}s, "
+                f"cooldown={COOLDOWN_SEC}s, valid packet timestamps):\n"
             )
             for cell_name, rep_label, counts in shortfall_warnings:
                 f.write(

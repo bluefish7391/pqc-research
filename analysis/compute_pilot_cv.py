@@ -2,41 +2,34 @@
 """
 compute_pilot_cv.py
 
-For a given collection directory (containing sweep_1, sweep_2, ... subdirs,
-each with the same 24 experimental cell subdirs), compute the coefficient of
+For a directory produced by reorg_pilot_by_cell.py (cell-first layout with
+rep_<N> directories), compute the coefficient of
 variation (CV = stddev/mean) of P50/P90/P99 handshake latency *across sweeps*,
 for each cell.
 
-Per-(sweep, cell) processing:
-  1. Load all 4 worker_*_requests.csv files from <cell>/locust/requests/.
-  2. Compute response_time_ms = (end_time_ns - start_time_ns) / 1e6 for all rows.
-  3. Determine t_start (min start_time_ns) and t_end (max end_time_ns) across
-     ALL rows (successes + failures) -- this is Option A: trial-activity-based
-     reference points, not success-only.
-  4. Keep rows where:
-       - success == "False"   (NOTE: this column is inverted in the source
-         data -- "False" means the request actually succeeded, see
-         locustfile.py's log_request_to_csv, which writes
-         `exception is not None` into the success field)
-       - start_time_ns >= t_start + WARMUP_SEC * 1e9
-       - end_time_ns   <= t_end   - COOLDOWN_SEC * 1e9
-  5. Sort by start_time_ns; if fewer than ANALYSIS_HANDSHAKE_TARGET rows remain, log a
+Per-(cell, repetition) processing:
+    1. Load pcap_stream_metrics.csv from each <cell>/rep_<N>/ directory.
+    2. Use stream_span_ms as the latency value.
+    3. Determine t_start and t_end from all rows with valid packet timestamps.
+  4. Keep rows where first_pkt_time >= t_start + WARMUP_SEC and
+      last_pkt_time <= t_end - COOLDOWN_SEC.
+  5. Sort by first_pkt_time; if fewer than ANALYSIS_HANDSHAKE_TARGET rows remain, log a
       warning but still compute P50/P90/P99 using all eligible rows. If at least
       ANALYSIS_HANDSHAKE_TARGET rows remain, use the first ANALYSIS_HANDSHAKE_TARGET rows (in time
       order) for percentile computation.
 
-Then, per cell, aggregate per-sweep P50/P90/P99 values across sweeps with at
+Then, per cell, aggregate per-repetition P50/P90/P99 values across repetitions with at
 least one eligible handshake and compute mean/stddev/CV for each percentile.
 
 Usage:
-    python3 compute_pilot_cv.py <collection_name> [--data-dir DATA_DIR]
+    python3 compute_pilot_cv.py <by_cell_dir>
 
-Outputs (written into the collection directory):
-    cv_results.csv       -- one row per cell: n_valid_sweeps, eligible
+Outputs (written into the mirror directory):
+    cv_results.csv       -- one row per cell: n_valid_repetitions, eligible
                              handshakes counted per trial (semicolon-separated),
                              means, per-trial percentile values (semicolon-
                              separated), CVs, and average throughput
-    warnings.log         -- one line per (sweep, cell) that fell short of
+    warnings.log         -- one line per (repetition, cell) that fell short of
                              ANALYSIS_HANDSHAKE_TARGET eligible handshakes
 """
 
@@ -58,7 +51,7 @@ ANALYSIS_HANDSHAKE_TARGET = 10_000  # handshakes used for percentile analysis
 TOTAL_HANDSHAKE_TARGET = 15_000  # handshakes actually completed by each trial
 OUTPUT_PERCENTILES = ("p50", "p90", "p95")
 REPETITION_PERCENTILES = ("p50", "p90", "p95")
-CELL_NAME_RE = re.compile(r"^(?P<base>.+)_rep\d+$")
+REP_DIR_RE = re.compile(r"^rep_(?P<num>\d+)$")
 PERCENTILE_NAME_RE = re.compile(r"^p(?P<value>\d+(?:\.\d+)?)$", re.IGNORECASE)
 RELATIVE_EFFECT_SIZE = 0.10  # detectable mean shift as a fraction of baseline mean
 ALPHA = 0.0167
@@ -67,87 +60,46 @@ GROUP_RATIO = 1.0
 # -----------------------------------------------------------------------------
 
 
-def find_sweep_dirs(collection_dir: Path):
-    sweep_dirs = sorted(
-        [p for p in collection_dir.iterdir() if p.is_dir() and p.name.startswith("sweep_")],
-        key=lambda p: p.name,
-    )
-    if not sweep_dirs:
-        sys.exit(f"ERROR: no sweep_* directories found under {collection_dir}")
-    return sweep_dirs
+def visible_subdirs(path: Path):
+    return sorted(p for p in path.iterdir() if p.is_dir() and not p.name.startswith("."))
 
 
-def canonical_cell_name(cell_name: str) -> str:
-    match = CELL_NAME_RE.match(cell_name)
-    return match.group("base") if match else cell_name
+def find_cell_reps(collection_dir: Path):
+    cell_reps = {}
+    for cell_dir in visible_subdirs(collection_dir):
+        reps = []
+        for rep_dir in visible_subdirs(cell_dir):
+            match = REP_DIR_RE.fullmatch(rep_dir.name)
+            if match:
+                reps.append((int(match.group("num")), rep_dir))
+        reps.sort(key=lambda pair: pair[0])
+        cell_reps[cell_dir.name] = reps
+    if not cell_reps:
+        sys.exit(f"ERROR: no cell directories found under {collection_dir}")
+    return cell_reps
 
 
-def get_cells_for_sweep(sweep_dir: Path):
-    """Return a mapping from canonical cell name to the actual directory."""
-    cells = {}
-    for cell_dir in sweep_dir.iterdir():
-        if not cell_dir.is_dir():
-            continue
-
-        cell_name = canonical_cell_name(cell_dir.name)
-        if cell_name in cells:
-            sys.exit(
-                f"ERROR: duplicate cell family '{cell_name}' in {sweep_dir.name}: "
-                f"{cells[cell_name].name} and {cell_dir.name}"
-            )
-        cells[cell_name] = cell_dir
-
-    return cells
-
-
-def assert_consistent_cells(sweep_dirs):
-    """All sweeps must contain the same set of cell names, or something is wrong
-    with the collection (a partial/failed sweep) and we should fail loudly
-    rather than silently comparing mismatched data."""
-    reference = None
-    for sweep_dir in sweep_dirs:
-        cells = set(get_cells_for_sweep(sweep_dir).keys())
-        if reference is None:
-            reference = cells
-        elif cells != reference:
-            missing = reference - cells
-            extra = cells - reference
-            sys.exit(
-                f"ERROR: cell mismatch in {sweep_dir.name}.\n"
-                f"  Missing: {sorted(missing)}\n"
-                f"  Extra:   {sorted(extra)}"
-            )
-    return sorted(reference)
-
-
-def load_cell_requests(cell_dir: Path):
-    """Load and concatenate all worker_*_requests.csv files for one cell/sweep.
-    Returns a list of dicts with start_time_ns, end_time_ns, success (raw str)."""
-    requests_dir = cell_dir / "locust" / "requests"
-    if not requests_dir.is_dir():
-        return None  # missing entirely -- treat as a failed/incomplete run
-
-    rows = []
-    worker_files = sorted(requests_dir.glob("worker_*_requests.csv"))
-    if not worker_files:
+def load_stream_metrics(rep_dir: Path):
+    """Load pcap stream metrics for one mirrored repetition."""
+    csv_path = rep_dir / "pcap_stream_metrics.csv"
+    if not csv_path.is_file():
         return None
 
-    for worker_file in worker_files:
-        with open(worker_file, newline="") as f:
-            reader = csv.DictReader(f)
-            for row in reader:
-                try:
-                    start_ns = int(row["start_time_ns"])
-                    end_ns = int(row["end_time_ns"])
-                except (KeyError, ValueError):
-                    continue  # skip malformed row rather than crash the whole script
-                rows.append(
-                    {
-                        "start_time_ns": start_ns,
-                        "end_time_ns": end_ns,
-                        "success": row.get("success", ""),
-                    }
-                )
+    rows = []
+    with open(csv_path, newline="") as f:
+        reader = csv.DictReader(f)
+        required = {"first_pkt_time", "last_pkt_time", "stream_span_ms"}
+        missing = required - set(reader.fieldnames or [])
+        if missing:
+            sys.exit(f"ERROR: {csv_path} is missing required column(s): {sorted(missing)}")
+        for row in reader:
+            try:
+                first = float(row["first_pkt_time"])
+                last = float(row["last_pkt_time"])
+                span = float(row["stream_span_ms"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            rows.append({"first_pkt_time": first, "last_pkt_time": last, "stream_span_ms": span})
     return rows
 
 
@@ -170,22 +122,21 @@ def compute_cell_percentiles(rows, percentile_specs):
             "cooldown_count": 0,
         }
 
-    # Option A: reference points from ALL rows (success + failure).
-    t_start = min(r["start_time_ns"] for r in rows)
-    t_end = max(r["end_time_ns"] for r in rows)
+    t_start = min(r["first_pkt_time"] for r in rows)
+    t_end = max(r["last_pkt_time"] for r in rows)
 
-    warmup_cutoff = t_start + WARMUP_SEC * 1_000_000_000
-    cooldown_cutoff = t_end - COOLDOWN_SEC * 1_000_000_000
+    warmup_cutoff = t_start + WARMUP_SEC
+    cooldown_cutoff = t_end - COOLDOWN_SEC
 
-    completed = [r for r in rows if r["success"] == "False"]
-    warm = [r for r in completed if r["start_time_ns"] < warmup_cutoff]
-    cooldown = [r for r in completed if r["end_time_ns"] > cooldown_cutoff]
+    completed = rows
+    warm = [r for r in completed if r["first_pkt_time"] < warmup_cutoff]
+    cooldown = [r for r in completed if r["last_pkt_time"] > cooldown_cutoff]
     eligible = [
         r
         for r in completed
-        if r["start_time_ns"] >= warmup_cutoff and r["end_time_ns"] <= cooldown_cutoff
+        if r["first_pkt_time"] >= warmup_cutoff and r["last_pkt_time"] <= cooldown_cutoff
     ]
-    eligible.sort(key=lambda r: r["start_time_ns"])
+    eligible.sort(key=lambda r: r["first_pkt_time"])
 
     counts = {
         "completed_count": len(completed),
@@ -202,10 +153,10 @@ def compute_cell_percentiles(rows, percentile_specs):
         if counts["eligible_count"] >= ANALYSIS_HANDSHAKE_TARGET
         else eligible
     )
-    latencies_ms = [(r["end_time_ns"] - r["start_time_ns"]) / 1e6 for r in window]
-    window_start_ns = window[0]["start_time_ns"]
-    window_end_ns = window[-1]["end_time_ns"]
-    duration_sec = (window_end_ns - window_start_ns) / 1e9
+    latencies_ms = [r["stream_span_ms"] for r in window]
+    window_start = window[0]["first_pkt_time"]
+    window_end = window[-1]["last_pkt_time"]
+    duration_sec = window_end - window_start
     throughput_hps = len(window) / duration_sec if duration_sec > 0 else None
 
     result = {label: percentile(latencies_ms, pct) for label, pct in percentile_specs}
@@ -356,11 +307,11 @@ def resolve_collection_dir(collection_dir_arg: str) -> Path:
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Compute per-cell latency CV across sweeps.")
+    parser = argparse.ArgumentParser(description="Compute per-cell latency CV across mirror repetitions.")
     parser.add_argument(
         "collection_dir",
         help=(
-            "Path to the collection directory (absolute or relative). "
+            "Path to a cell-first mirror directory (absolute or relative). "
             "On Windows/Git Bash, prefer C:/... or quote backslash paths."
         ),
     )
@@ -391,10 +342,11 @@ def main():
     repetition_percentile_labels = [label for label, _ in repetition_percentile_specs]
     all_percentile_labels = [label for label, _ in all_percentile_specs]
 
-    sweep_dirs = find_sweep_dirs(collection_dir)
-    cell_names = assert_consistent_cells(sweep_dirs)
+    cell_reps = find_cell_reps(collection_dir)
+    cell_names = sorted(cell_reps)
+    repetition_count = len({rep_number for reps in cell_reps.values() for rep_number, _ in reps})
 
-    print(f"Found {len(sweep_dirs)} sweep(s), {len(cell_names)} cell(s).")
+    print(f"Found {repetition_count} repetition(s), {len(cell_names)} cell(s).")
 
     # per_cell_percentiles[cell][percentile] = list of values, one per valid sweep
     per_cell_percentiles = {cell: {p: [] for p in all_percentile_labels} for cell in cell_names}
@@ -408,19 +360,13 @@ def main():
         "cooldown_count": 0,
     }
 
-    for sweep_dir in sweep_dirs:
-        cells_for_sweep = get_cells_for_sweep(sweep_dir)
-        for cell_name in cell_names:
-            cell_dir = cells_for_sweep.get(cell_name)
-            if cell_dir is None:
-                per_cell_handshakes_counted[cell_name].append(0)
-                warnings.append((sweep_dir.name, cell_name, zero_counts))
-                continue
-
-            rows = load_cell_requests(cell_dir)
+    for cell_name in cell_names:
+        for rep_number, rep_dir in cell_reps[cell_name]:
+            rep_label = f"rep_{rep_number}"
+            rows = load_stream_metrics(rep_dir)
             if rows is None:
                 per_cell_handshakes_counted[cell_name].append(0)
-                warnings.append((sweep_dir.name, cell_name, zero_counts))
+                warnings.append((rep_label, cell_name, zero_counts))
                 continue
 
             result, counts = compute_cell_percentiles(rows, all_percentile_specs)
@@ -428,7 +374,7 @@ def main():
             per_cell_handshakes_counted[cell_name].append(counts["eligible_count"])
 
             if counts["eligible_count"] < ANALYSIS_HANDSHAKE_TARGET:
-                warnings.append((sweep_dir.name, cell_name, counts))
+                warnings.append((rep_label, cell_name, counts))
 
             if result is None:
                 continue
@@ -448,9 +394,9 @@ def main():
                 f"Cells falling short of ANALYSIS_HANDSHAKE_TARGET={ANALYSIS_HANDSHAKE_TARGET} "
                 f"eligible handshakes (after warmup={WARMUP_SEC}s, cooldown={COOLDOWN_SEC}s, success-only filter):\n"
             )
-            for sweep_name, cell_name, counts in warnings:
+            for rep_name, cell_name, counts in warnings:
                 f.write(
-                    f"  {sweep_name} / {cell_name}: completed={counts['completed_count']}, "
+                    f"  {cell_name} / {rep_name}: completed={counts['completed_count']}, "
                     f"warm_period={counts['warm_count']}, eligible={counts['eligible_count']}, "
                     f"cooldown_period={counts['cooldown_count']}\n"
                 )
@@ -459,7 +405,7 @@ def main():
     results_path = collection_dir / "cv_results.csv"
     with open(results_path, "w", newline="") as f:
         writer = csv.writer(f)
-        header = ["cell", "n_valid_sweeps", "eligible_handshakes_counted"]
+        header = ["cell", "n_valid_repetitions", "eligible_handshakes_counted"]
         header += ["avg_throughput_hps", "estimated_trial_duration_sec"]
         for p in output_percentile_labels:
             header += [f"{p}_mean_ms", f"{p}_values_ms", f"{p}_cv"]
