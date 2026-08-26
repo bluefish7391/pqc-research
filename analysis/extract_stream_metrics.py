@@ -167,13 +167,22 @@ def run_tshark(args: list) -> str:
 def extract_stream_packets(pcap_path: Path, keylog_path: Path) -> pd.DataFrame:
     """
     Returns a DataFrame with one row per packet in capture.pcap:
-        tcp.stream, frame.time_epoch, ip.src, tcp.len, tls.handshake.type,
-        tcp.analysis.retransmission, tcp.flags.syn, tcp.flags.ack
+        tcp.stream, frame.time_epoch, ip.src, tcp.len, frame.len,
+        tls.handshake.type, tcp.analysis.retransmission, tcp.flags.syn,
+        tcp.flags.ack, ip.flags.mf, ip.frag_offset
 
     This raw, per-packet data feeds compute_phase_markers() and
     compute_retransmission_stats() below. tcp.flags.syn/tcp.flags.ack are
     the dedicated boolean flag fields (0/1), not the raw tcp.flags bitmask,
     so they can be compared directly without bit-masking.
+
+    frame.len (whole-frame wire-byte length, header included) backs the
+    handshake-size and hello-packet-span metrics computed below -- these
+    are deliberately kept separate from tcp.len (payload-only length)
+    already used elsewhere, since "bytes on the wire" was the explicit
+    definition chosen for those metrics.
+
+    ip.flags.mf / ip.frag_offset back compute_fragmentation_total() below.
     """
     print("[2/5] Extracting per-packet timing, phase, and retransmission markers from capture.pcap...")
     stdout = run_tshark([
@@ -184,10 +193,13 @@ def extract_stream_packets(pcap_path: Path, keylog_path: Path) -> pd.DataFrame:
         "-e", "frame.time_epoch",
         "-e", "ip.src",
         "-e", "tcp.len",
+        "-e", "frame.len",
         "-e", "tls.handshake.type",
         "-e", "tcp.analysis.retransmission",
         "-e", "tcp.flags.syn",
         "-e", "tcp.flags.ack",
+        "-e", "ip.flags.mf",
+        "-e", "ip.frag_offset",
         "-E", "header=y",
         "-E", "separator=,",
         "-E", "quote=d",
@@ -201,6 +213,7 @@ def extract_stream_packets(pcap_path: Path, keylog_path: Path) -> pd.DataFrame:
 
     df["frame.time_epoch"] = df["frame.time_epoch"].astype(float)
     df["tcp.len"] = pd.to_numeric(df["tcp.len"], errors="coerce").fillna(0)
+    df["frame.len"] = pd.to_numeric(df["frame.len"], errors="coerce").fillna(0)
     # tcp.analysis.retransmission is a presence-only field (empty when absent,
     # "1" when present). Cast to a clean boolean rather than carrying the
     # raw string/NaN representation through the rest of the pipeline.
@@ -210,6 +223,11 @@ def extract_stream_packets(pcap_path: Path, keylog_path: Path) -> pd.DataFrame:
     # missing values to 0 rather than leaving them as NaN.
     df["tcp.flags.syn"] = pd.to_numeric(df["tcp.flags.syn"], errors="coerce").fillna(0).astype(int)
     df["tcp.flags.ack"] = pd.to_numeric(df["tcp.flags.ack"], errors="coerce").fillna(0).astype(int)
+    # ip.flags.mf / ip.frag_offset are only populated on IP-fragmented
+    # packets; coerce missing values to 0 ("not a fragment") rather than
+    # leaving them as NaN, same treatment as the TCP flag fields above.
+    df["ip.flags.mf"] = pd.to_numeric(df["ip.flags.mf"], errors="coerce").fillna(0).astype(int)
+    df["ip.frag_offset"] = pd.to_numeric(df["ip.frag_offset"], errors="coerce").fillna(0).astype(int)
 
     return df
 
@@ -354,11 +372,18 @@ def compute_phase_markers(packets_df: pd.DataFrame, ids_df: pd.DataFrame, server
             return False
         return "1" in field.split(";")
 
+    def has_serverhello(field):
+        if not isinstance(field, str):
+            return False
+        return "2" in field.split(";")
+
     is_clienthello = packets_df["tls.handshake.type"].apply(has_clienthello)
+    is_serverhello = packets_df["tls.handshake.type"].apply(has_serverhello)
 
     first_pkt_time = packets_df.groupby("tcp.stream")["frame.time_epoch"].min()
     last_pkt_time = packets_df.groupby("tcp.stream")["frame.time_epoch"].max()
     clienthello_time = packets_df[is_clienthello].groupby("tcp.stream")["frame.time_epoch"].min()
+    serverhello_time = packets_df[is_serverhello].groupby("tcp.stream")["frame.time_epoch"].min()
 
     # -- TCP 3-way handshake markers --
     is_syn_ack = (
@@ -399,6 +424,7 @@ def compute_phase_markers(packets_df: pd.DataFrame, ids_df: pd.DataFrame, server
         "syn_ack_time": syn_ack_time,
         "tcp_handshake_complete_time": tcp_handshake_complete_time,
         "clienthello_time": clienthello_time,
+        "serverhello_time": serverhello_time,
         "first_response_pkt_time": first_response_pkt_time,
         "last_data_pkt_time": last_data_pkt_time,
         "last_new_data_pkt_time": last_new_data_pkt_time,
@@ -412,16 +438,216 @@ def compute_phase_markers(packets_df: pd.DataFrame, ids_df: pd.DataFrame, server
     return markers
 
 
-def build_stream_table(markers_df: pd.DataFrame, ids_df: pd.DataFrame, retrans_df: pd.DataFrame) -> pd.DataFrame:
+def compute_handshake_size(packets_df: pd.DataFrame, markers_df: pd.DataFrame, ids_df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Returns a DataFrame with one row per TCP stream:
+        tcp.stream, handshake_bytes, handshake_packet_count
+
+    Defines "the handshake" as a time window -- every packet in the
+    stream from first_pkt_time through get_request_time -- rather than
+    by which packets tshark happens to tag with a tls.handshake.type.
+    This is a deliberate choice: tshark only tags the packet where a TLS
+    record finishes reassembling, so a message split across multiple TCP
+    segments (the case this project cares about most, since a hybrid
+    ClientHello is the one message mechanically guaranteed to be larger)
+    would be undercounted by a tagging-based filter. The time-window
+    definition trades a small amount of precision (a stray
+    retransmission landing inside the window gets counted) for a
+    definition that can't silently miss segmented messages.
+
+    Streams with no decrypted GET request (get_request_time is NaN) get
+    NaN in both output columns, consistent with how other GET-dependent
+    phase columns are handled elsewhere in this script.
+    """
+    get_times = ids_df.set_index("tcp.stream")["get_request_time"]
+    first_times = markers_df.set_index("tcp.stream")["first_pkt_time"]
+
+    df = packets_df.copy()
+    df["first_pkt_time"] = df["tcp.stream"].map(first_times)
+    df["get_request_time"] = df["tcp.stream"].map(get_times)
+
+    # NaN comparisons evaluate to False, so streams with no get_request_time
+    # are automatically excluded here (and end up NaN after the left-merge
+    # in build_stream_table), rather than needing an explicit check.
+    in_window = (
+        (df["frame.time_epoch"] >= df["first_pkt_time"])
+        & (df["frame.time_epoch"] <= df["get_request_time"])
+    )
+
+    return (
+        df[in_window]
+        .groupby("tcp.stream")
+        .agg(handshake_bytes=("frame.len", "sum"), handshake_packet_count=("frame.len", "count"))
+        .reset_index()
+    )
+
+
+def extract_hello_lengths(pcap_path: Path, keylog_path: Path) -> pd.DataFrame:
+    """
+    Returns a DataFrame with one row per TCP stream that had an
+    identifiable ClientHello and/or ServerHello:
+        tcp.stream, clienthello_length, serverhello_length
+
+    Uses tls.handshake.length rather than the frame.len-based windowing
+    used elsewhere in this script. tls.handshake.length is the exact,
+    protocol-defined message length (header-and-segmentation-agnostic),
+    reported by tshark on whichever packet completes reassembly of that
+    message -- so it is correct even when the message was split across
+    multiple TCP segments. This is a deliberate departure from the
+    "bytes on the wire" definition used for handshake_bytes above: it
+    answers "how big was this message, per the protocol" rather than
+    "how many bytes did it cost to deliver on the wire."
+    """
+    print("Extracting ClientHello/ServerHello lengths...")
+    stdout = run_tshark([
+        "-r", str(pcap_path),
+        "-o", f"tls.keylog_file:{keylog_path}",
+        "-Y", "tls.handshake.type == 1 or tls.handshake.type == 2",
+        "-T", "fields",
+        "-e", "tcp.stream",
+        "-e", "tls.handshake.type",
+        "-e", "tls.handshake.length",
+        "-E", "header=y",
+        "-E", "separator=,",
+        "-E", "quote=d",
+        "-E", "occurrence=a",
+        "-E", "aggregator=;",
+    ])
+
+    empty_result = pd.DataFrame(columns=["tcp.stream", "clienthello_length", "serverhello_length"])
+
+    df = pd.read_csv(StringIO(stdout))
+    if df.empty:
+        print("  WARNING: no ClientHello/ServerHello messages found via tls.handshake.length.")
+        return empty_result
+
+    # tls.handshake.type / tls.handshake.length can each carry more than one
+    # ';'-joined value on a single packet if multiple handshake messages
+    # coalesce into one TLS record. Explode both fields together (pandas
+    # >= 1.3) so each (type, length) pair lands on its own row before
+    # filtering -- otherwise a coalesced record could hide a hello length
+    # behind an unrelated message sharing the same packet.
+    df["tls.handshake.type"] = df["tls.handshake.type"].astype(str).str.split(";")
+    df["tls.handshake.length"] = df["tls.handshake.length"].astype(str).str.split(";")
+    df = df.explode(["tls.handshake.type", "tls.handshake.length"])
+
+    df["tls.handshake.type"] = pd.to_numeric(df["tls.handshake.type"], errors="coerce")
+    df["tls.handshake.length"] = pd.to_numeric(df["tls.handshake.length"], errors="coerce")
+
+    # A stream could in principle show more than one ClientHello/ServerHello
+    # row (e.g. a dissected retransmission of the same message); keep the
+    # first, same policy as extract_stream_request_ids() uses for duplicate
+    # HTTP requests.
+    clienthello = (
+        df[df["tls.handshake.type"] == 1]
+        .drop_duplicates(subset="tcp.stream", keep="first")[["tcp.stream", "tls.handshake.length"]]
+        .rename(columns={"tls.handshake.length": "clienthello_length"})
+    )
+    serverhello = (
+        df[df["tls.handshake.type"] == 2]
+        .drop_duplicates(subset="tcp.stream", keep="first")[["tcp.stream", "tls.handshake.length"]]
+        .rename(columns={"tls.handshake.length": "serverhello_length"})
+    )
+
+    if clienthello.empty and serverhello.empty:
+        return empty_result
+
+    return clienthello.merge(serverhello, on="tcp.stream", how="outer")
+
+
+def compute_hello_packet_spans(packets_df: pd.DataFrame, markers_df: pd.DataFrame, server_ip: str) -> pd.DataFrame:
+    """
+    Returns a DataFrame with one row per TCP stream:
+        tcp.stream, clienthello_packet_span, clienthello_span_bytes,
+        serverhello_packet_span, serverhello_span_bytes
+
+    Reports how many packets (and how many wire bytes) it took to
+    deliver each hello message, using the same per-stream time windows
+    already established in compute_phase_markers:
+      - ClientHello span: client-sourced packets strictly after
+        tcp_handshake_complete_time, up through clienthello_time.
+      - ServerHello span: server-sourced packets strictly after
+        clienthello_time, up through serverhello_time.
+    A span of 1 means the message fit in a single segment; a span > 1
+    means it was split across multiple TCP segments -- the fragmentation
+    -relevant case motivating this metric (a larger hybrid ClientHello
+    is more likely to need more than one segment). Streams missing a
+    marker (e.g. no ServerHello identified) get NaN, consistent with
+    other marker-dependent columns in this script.
+    """
+    m = markers_df.set_index("tcp.stream")
+    df = packets_df.copy()
+    df["tcp_handshake_complete_time"] = df["tcp.stream"].map(m["tcp_handshake_complete_time"])
+    df["clienthello_time"] = df["tcp.stream"].map(m["clienthello_time"])
+    df["serverhello_time"] = df["tcp.stream"].map(m["serverhello_time"])
+
+    in_clienthello_window = (
+        (df["ip.src"] != server_ip)
+        & (df["frame.time_epoch"] > df["tcp_handshake_complete_time"])
+        & (df["frame.time_epoch"] <= df["clienthello_time"])
+    )
+    in_serverhello_window = (
+        (df["ip.src"] == server_ip)
+        & (df["frame.time_epoch"] > df["clienthello_time"])
+        & (df["frame.time_epoch"] <= df["serverhello_time"])
+    )
+
+    clienthello_span = (
+        df[in_clienthello_window]
+        .groupby("tcp.stream")
+        .agg(clienthello_packet_span=("frame.len", "count"), clienthello_span_bytes=("frame.len", "sum"))
+        .reset_index()
+    )
+    serverhello_span = (
+        df[in_serverhello_window]
+        .groupby("tcp.stream")
+        .agg(serverhello_packet_span=("frame.len", "count"), serverhello_span_bytes=("frame.len", "sum"))
+        .reset_index()
+    )
+
+    return clienthello_span.merge(serverhello_span, on="tcp.stream", how="outer")
+
+
+def compute_fragmentation_total(packets_df: pd.DataFrame) -> int:
+    """
+    Returns a single trial-wide count of IP-fragmented packets: any
+    packet with the "more fragments" flag set (ip.flags.mf == 1) or a
+    nonzero fragment offset (ip.frag_offset > 0).
+
+    Deliberately NOT grouped by tcp.stream: only the first piece of a
+    fragmented packet carries a TCP header (source/destination port,
+    sequence number), since that information lives in the payload that
+    got split away for every later fragment. tshark therefore cannot
+    assign tcp.stream to most fragments, so a per-stream breakdown would
+    silently undercount. Reported once per trial instead. Expected to be
+    0 for most/all trials given typical Docker-bridge MTU sizes -- kept
+    here to confirm that assumption rather than leave it unverified.
+    """
+    is_fragment = (packets_df["ip.flags.mf"] == 1) | (packets_df["ip.frag_offset"] > 0)
+    return int(is_fragment.sum())
+
+
+def build_stream_table(
+    markers_df: pd.DataFrame,
+    ids_df: pd.DataFrame,
+    retrans_df: pd.DataFrame,
+    handshake_size_df: pd.DataFrame,
+    hello_lengths_df: pd.DataFrame,
+    hello_spans_df: pd.DataFrame,
+) -> pd.DataFrame:
     """
     Assembles the final per-stream table: phase markers, request IDs (for
-    get_request_time / phase_available), and retransmission counts, all
-    keyed on tcp.stream. This is a set of left-joins on a single key that
-    every source shares (tcp.stream) -- not the request_id-based join the
-    old combine_trial_data.py performed against Locust's data.
+    get_request_time / phase_available), retransmission counts,
+    handshake-window size, hello message lengths, and hello packet spans,
+    all keyed on tcp.stream. This is a set of left-joins on a single key
+    that every source shares (tcp.stream) -- not the request_id-based
+    join the old combine_trial_data.py performed against Locust's data.
     """
     table = markers_df.merge(ids_df, on="tcp.stream", how="left")
     table = table.merge(retrans_df, on="tcp.stream", how="left")
+    table = table.merge(handshake_size_df, on="tcp.stream", how="left")
+    table = table.merge(hello_lengths_df, on="tcp.stream", how="left")
+    table = table.merge(hello_spans_df, on="tcp.stream", how="left")
     table["retransmission_count"] = table["retransmission_count"].fillna(0).astype(int)
     table["phase_available"] = table["get_request_time"].notna()
 
@@ -471,6 +697,9 @@ def build_stream_table(markers_df: pd.DataFrame, ids_df: pd.DataFrame, retrans_d
         "retransmission_count",
         "syn_ack_time", "tcp_handshake_complete_time", "pure_tcp_handshake_ms",
         "clienthello_time", "client_key_prep_ms",
+        "clienthello_length", "clienthello_packet_span", "clienthello_span_bytes",
+        "serverhello_time", "serverhello_length", "serverhello_packet_span", "serverhello_span_bytes",
+        "handshake_bytes", "handshake_packet_count",
         "get_request_time", "tls_negotiation_ms",
         "first_response_pkt_time", "ttfb_ms",
         "last_new_data_pkt_time", "response_transfer_ms",
@@ -520,10 +749,26 @@ def main():
 
     retrans_df = compute_retransmission_stats(packets_df)
     markers_df = compute_phase_markers(packets_df, ids_df, args.server_ip)
-    result = build_stream_table(markers_df, ids_df, retrans_df)
+    handshake_size_df = compute_handshake_size(packets_df, markers_df, ids_df)
+    hello_lengths_df = extract_hello_lengths(pcap_path, keylog_path)
+    hello_spans_df = compute_hello_packet_spans(packets_df, markers_df, args.server_ip)
+    fragmentation_total = compute_fragmentation_total(packets_df)
+
+    result = build_stream_table(
+        markers_df, ids_df, retrans_df, handshake_size_df, hello_lengths_df, hello_spans_df
+    )
 
     output_path = parse_path_arg(args.output).resolve() if args.output else (trial_dir / "pcap_stream_metrics.csv")
     result.to_csv(output_path, index=False, float_format="%.12f")
+
+    # Trial-wide (not per-stream) metric: written to its own small file
+    # rather than as a repeated constant column on every row of the
+    # per-stream CSV, since fragmentation can't be attributed to a stream
+    # (see compute_fragmentation_total docstring).
+    fragmentation_summary_path = trial_dir / "fragmentation_summary.csv"
+    pd.DataFrame([{"fragmented_packet_count": fragmentation_total}]).to_csv(
+        fragmentation_summary_path, index=False
+    )
 
     total = len(result)
     available = int(result["phase_available"].sum())
@@ -531,6 +776,7 @@ def main():
     print(f"\nWrote {output_path}")
     print(f"{available}/{total} streams had a decrypted GET request ({rate:.1%}); "
           f"the remainder still have stream_span_ms and retransmission_count.")
+    print(f"Wrote {fragmentation_summary_path} (fragmented_packet_count={fragmentation_total})")
 
 
 if __name__ == "__main__":
