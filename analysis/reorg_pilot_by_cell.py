@@ -4,7 +4,7 @@ reorg_pilot_by_cell.py
 
 Reorganizes a pilot collection directory in sweep-first layout into a
 cell-first sibling directory containing only derived per-repetition output
-(combined_metrics.csv).
+(pcap_stream_metrics.csv).
 
 Expected pilot input layout:
 
@@ -21,7 +21,7 @@ Output layout (default: a sibling directory named "<PILOT_DIR>_by_cell"):
     PILOT_DIR_by_cell/
       <cell_name>/
         rep_<N>/
-          combined_metrics.csv
+          pcap_stream_metrics.csv
 
 Notes:
   - Output repetition index is taken from sweep_<N>, not from the trial
@@ -34,6 +34,7 @@ Usage:
     python3 reorg_pilot_by_cell.py /absolute/path/to/pilot_dir
     python3 reorg_pilot_by_cell.py /absolute/path/to/pilot_dir --output /some/other/dir
     python3 reorg_pilot_by_cell.py /absolute/path/to/pilot_dir --force
+    python3 reorg_pilot_by_cell.py /absolute/path/to/pilot_dir --extract-script /path/to/extract_stream_metrics.py
 """
 
 import argparse
@@ -52,8 +53,8 @@ def die(msg: str) -> None:
     sys.exit(1)
 
 
-def default_combine_script() -> Path:
-    return Path(__file__).resolve().parent / "combine_trial_data.py"
+def default_extract_script() -> Path:
+    return Path(__file__).resolve().parent / "extract_stream_metrics.py"
 
 
 def visible_subdirs(path: Path):
@@ -107,26 +108,26 @@ def find_trials(pilot_dir: Path, log):
 
 
 def trial_already_done(dest: Path) -> bool:
-    return (dest / "combined_metrics.csv").exists()
+    return (dest / "pcap_stream_metrics.csv").exists()
 
 
-def process_trial(trial_dir: Path, dest: Path, combine_script: Path, log):
+def process_trial(trial_dir: Path, dest: Path, extract_script: Path, log):
     dest.mkdir(parents=True, exist_ok=True)
 
-    combined_csv = dest / "combined_metrics.csv"
+    pcap_metrics_csv = dest / "pcap_stream_metrics.csv"
     cmd = [
         sys.executable,
-        str(combine_script),
+        str(extract_script),
         str(trial_dir),
         "--output",
-        str(combined_csv),
+        str(pcap_metrics_csv),
     ]
     log(f"    Running: {' '.join(cmd)}")
     result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode != 0:
         stderr_tail = "\n".join(result.stderr.strip().splitlines()[-15:])
         raise RuntimeError(
-            f"combine_trial_data.py exited {result.returncode} for {trial_dir}\n"
+            f"extract_stream_metrics.py exited {result.returncode} for {trial_dir}\n"
             f"--- stderr (tail) ---\n{stderr_tail}"
         )
 
@@ -147,10 +148,10 @@ def main():
         "(non-empty) output directory.",
     )
     parser.add_argument(
-        "--combine-script",
+        "--extract-script",
         type=str,
         default=None,
-        help="Path to combine_trial_data.py (default: looked for alongside this script)",
+        help="Path to extract_stream_metrics.py (default: looked for alongside this script)",
     )
     args = parser.parse_args()
 
@@ -158,11 +159,11 @@ def main():
     if not pilot_dir.is_dir():
         die(f"{pilot_dir} is not a directory.")
 
-    combine_script = Path(args.combine_script).expanduser().resolve() if args.combine_script else default_combine_script()
-    if not combine_script.is_file():
+    extract_script = Path(args.extract_script).expanduser().resolve() if args.extract_script else default_extract_script()
+    if not extract_script.is_file():
         die(
-            f"combine_trial_data.py not found at {combine_script}. "
-            "Pass --combine-script /path/to/combine_trial_data.py."
+            f"extract_stream_metrics.py not found at {extract_script}. "
+            "Pass --extract-script /path/to/extract_stream_metrics.py."
         )
 
     output_dir = Path(args.output).expanduser().resolve() if args.output else pilot_dir.parent / f"{pilot_dir.name}_by_cell"
@@ -188,7 +189,7 @@ def main():
         log(f"reorg_pilot_by_cell.py log -- {datetime.datetime.now().isoformat()}")
         log(f"pilot_dir:      {pilot_dir}")
         log(f"output_dir:     {output_dir}")
-        log(f"combine_script: {combine_script}")
+        log(f"extract_script: {extract_script}")
         log(f"force:          {args.force}")
         log("")
 
@@ -209,13 +210,13 @@ def main():
             log(f"[{cell_name} / rep_{rep_number}] trial_dir={trial_dir}")
 
             if not args.force and trial_already_done(dest):
-                log("    SKIPPED (already has combined_metrics.csv)")
+                log("    SKIPPED (already has pcap_stream_metrics.csv)")
                 skipped += 1
                 log("")
                 continue
 
             try:
-                process_trial(trial_dir, dest, combine_script, log)
+                process_trial(trial_dir, dest, extract_script, log)
                 log(f"    OK -> {dest}")
                 processed += 1
             except Exception as exc:

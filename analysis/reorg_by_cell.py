@@ -4,7 +4,7 @@ reorg_by_cell.py
 
 Reorganizes a trial collection directory into a sibling directory
 containing ONLY the derived per-repetition analysis output
-(combined_metrics.csv) for every trial, in the
+(pcap_stream_metrics.csv) for every trial, in the
 same cell -> repetition layout as the original.
 
 Expected input layout (as produced by run_matrix.sh / run_trial.sh):
@@ -22,17 +22,16 @@ Output layout (default: a sibling directory named "<COLLECTION_DIR>_by_cell"):
     COLLECTION_DIR_by_cell/
       <cell_name>/
         rep_<N>/
-          combined_metrics.csv
+          pcap_stream_metrics.csv
 
-For each trial directory, this script invokes combine_trial_data.py
-(unmodified) to perform the actual pcap/CSV join, pointing its --output
-flag directly at the new location. Keylog material is used only through
-temporary files and is not retained in either directory.
+For each trial directory, this script invokes extract_stream_metrics.py,
+pointing its --output flag directly at the new location. Keylog material is
+used only through temporary files and is not retained in either directory.
 
 Raw trial data (capture.pcap, keylogs/, locust/requests/*.csv) is left
 in place under COLLECTION_DIR and is NOT duplicated into the new tree.
 
-A failed trial (nonzero exit from combine_trial_data.py) intentionally
+A failed trial (nonzero exit from extract_stream_metrics.py) intentionally
 leaves behind whatever partial output
 already exists in its rep_<N>/ directory rather than being cleaned up.
 This makes failures visible (an empty or half-populated rep_<N>/ folder)
@@ -44,9 +43,9 @@ Usage:
     python3 reorg_by_cell.py /absolute/path/to/COLLECTION_DIR
     python3 reorg_by_cell.py /absolute/path/to/COLLECTION_DIR --output /some/other/dir
     python3 reorg_by_cell.py /absolute/path/to/COLLECTION_DIR --force
-    python3 reorg_by_cell.py /absolute/path/to/COLLECTION_DIR --combine-script /path/to/combine_trial_data.py
+    python3 reorg_by_cell.py /absolute/path/to/COLLECTION_DIR --extract-script /path/to/extract_stream_metrics.py
 
-Requires: combine_trial_data.py (and, transitively, tshark + pandas).
+Requires: extract_stream_metrics.py (and, transitively, tshark + pandas).
 """
 
 import argparse
@@ -64,9 +63,9 @@ def die(msg: str) -> None:
     sys.exit(1)
 
 
-def default_combine_script() -> Path:
-    """combine_trial_data.py is expected to live alongside this script."""
-    return Path(__file__).resolve().parent / "combine_trial_data.py"
+def default_extract_script() -> Path:
+    """extract_stream_metrics.py is expected to live alongside this script."""
+    return Path(__file__).resolve().parent / "extract_stream_metrics.py"
 
 
 def visible_subdirs(path: Path):
@@ -102,29 +101,29 @@ def find_trials(collection_dir: Path, log):
 
 def trial_already_done(dest: Path) -> bool:
     """A trial counts as already-processed when its derived CSV is present."""
-    return (dest / "combined_metrics.csv").exists()
+    return (dest / "pcap_stream_metrics.csv").exists()
 
 
-def process_trial(trial_dir: Path, dest: Path, combine_script: Path, log):
+def process_trial(trial_dir: Path, dest: Path, extract_script: Path, log):
     """
-    Runs combine_trial_data.py for one trial.
+    Runs extract_stream_metrics.py for one trial.
     Raises RuntimeError with a descriptive message on failure; the caller
     catches this per-trial so one bad trial doesn't abort the whole collection.
     """
     dest.mkdir(parents=True, exist_ok=True)
 
-    combined_csv = dest / "combined_metrics.csv"
+    pcap_metrics_csv = dest / "pcap_stream_metrics.csv"
     cmd = [
-        sys.executable, str(combine_script),
+        sys.executable, str(extract_script),
         str(trial_dir),
-        "--output", str(combined_csv),
+        "--output", str(pcap_metrics_csv),
     ]
     log(f"    Running: {' '.join(cmd)}")
     result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode != 0:
         stderr_tail = "\n".join(result.stderr.strip().splitlines()[-15:])
         raise RuntimeError(
-            f"combine_trial_data.py exited {result.returncode} for {trial_dir}\n"
+            f"extract_stream_metrics.py exited {result.returncode} for {trial_dir}\n"
             f"--- stderr (tail) ---\n{stderr_tail}"
         )
 
@@ -137,19 +136,19 @@ def main():
     parser.add_argument("--force", action="store_true",
                          help="Reprocess trials even if their outputs already exist, and allow running "
                               "into an existing (non-empty) output directory.")
-    parser.add_argument("--combine-script", type=str, default=None,
-                         help="Path to combine_trial_data.py (default: looked for alongside this script)")
+    parser.add_argument("--extract-script", type=str, default=None,
+                         help="Path to extract_stream_metrics.py (default: looked for alongside this script)")
     args = parser.parse_args()
 
     collection_dir = Path(args.collection_dir).expanduser().resolve()
     if not collection_dir.is_dir():
         die(f"{collection_dir} is not a directory.")
 
-    combine_script = (Path(args.combine_script).expanduser().resolve()
-                       if args.combine_script else default_combine_script())
-    if not combine_script.is_file():
-        die(f"combine_trial_data.py not found at {combine_script}. "
-            f"Pass --combine-script /path/to/combine_trial_data.py.")
+    extract_script = (Path(args.extract_script).expanduser().resolve()
+                      if args.extract_script else default_extract_script())
+    if not extract_script.is_file():
+        die(f"extract_stream_metrics.py not found at {extract_script}. "
+            f"Pass --extract-script /path/to/extract_stream_metrics.py.")
 
     output_dir = (Path(args.output).expanduser().resolve() if args.output
                   else collection_dir.parent / f"{collection_dir.name}_by_cell")
@@ -175,7 +174,7 @@ def main():
         log(f"reorg_by_cell.py log -- {datetime.datetime.now().isoformat()}")
         log(f"collection_dir: {collection_dir}")
         log(f"output_dir:     {output_dir}")
-        log(f"combine_script: {combine_script}")
+        log(f"extract_script: {extract_script}")
         log(f"force:          {args.force}")
         log("")
 
@@ -195,13 +194,13 @@ def main():
             log(f"[{cell_name} / rep_{rep_number}] trial_dir={trial_dir}")
 
             if not args.force and trial_already_done(dest):
-                log("    SKIPPED (already has combined_metrics.csv)")
+                log("    SKIPPED (already has pcap_stream_metrics.csv)")
                 skipped += 1
                 log("")
                 continue
 
             try:
-                process_trial(trial_dir, dest, combine_script, log)
+                process_trial(trial_dir, dest, extract_script, log)
                 log(f"    OK -> {dest}")
                 processed += 1
             except Exception as e:
