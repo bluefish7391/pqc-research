@@ -70,7 +70,7 @@ from pathlib import Path
 WARMUP_SEC = 10          # seconds after trial start to discard (pcap-time)
 COOLDOWN_SEC = 10        # seconds before trial end to discard (pcap-time)
 ANALYSIS_HANDSHAKE_TARGET = 10_000  # handshakes used for percentile analysis
-PERCENTILES = (("p50", 50.0), ("p95", 95.0), ("p99", 99.0))
+PERCENTILES = (("p50", 50.0), ("p90", 90.0), ("p95", 95.0))
 REP_DIR_RE = re.compile(r"^rep_(?P<num>\d+)$")
 REQUIRED_COLUMNS = {"first_pkt_time", "last_pkt_time", "stream_span_ms"}
 RELATIVE_EFFECT_SIZE = 0.10  # detectable mean shift as a fraction of baseline mean
