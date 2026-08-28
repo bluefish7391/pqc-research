@@ -4,14 +4,15 @@ reorg_by_cell.py
 
 Reorganizes a trial collection directory into a sibling directory
 containing ONLY the derived per-repetition analysis output
-(pcap_stream_metrics.csv, fragmentation_summary.csv, and the
-container_stats/ CPU-mem-network CSVs) for every trial, in the same
-cell -> repetition layout as the original.
+(pcap_stream_metrics.csv, fragmentation_summary.csv, throttle_deltas.csv,
+and the container_stats/ CPU-mem-network CSVs) for every trial, in the
+same cell -> repetition layout as the original.
 
 Expected input layout (as produced by run_matrix.sh / run_trial.sh):
 
     COLLECTION_DIR/
       <cell_name>/
+        throttle_stats.csv          # one row per trial in this cell
         <cell_name>_rep<N>/
           capture.pcap
           keylogs/
@@ -29,6 +30,7 @@ Output layout (default: a sibling directory named "<COLLECTION_DIR>_by_cell"):
         rep_<N>/
           pcap_stream_metrics.csv
           fragmentation_summary.csv
+          throttle_deltas.csv
           container_stats/
             locust_cpu_matrix_<run_id>.csv
             nginx_cpu_matrix_<run_id>.csv
@@ -41,8 +43,13 @@ into the original trial directory (it has no --output flag for that file),
 so this script copies it into the new location afterward rather than
 relying on the subprocess to place it there directly. The container_stats/
 files are copied over as-is, unmodified -- they need no extraction step,
-just relocation alongside the derived per-stream data. Keylog material is
-used only through temporary files and is not retained in either directory.
+just relocation alongside the derived per-stream data. This script also
+invokes compute_throttle_deltas.py per trial, pointing it at the SOURCE
+cell's shared throttle_stats.csv and letting its own --output flag write
+throttle_deltas.csv directly into the new per-trial location (no separate
+copy step needed there, unlike fragmentation_summary.csv). Keylog material
+is used only through temporary files and is not retained in either
+directory.
 
 Raw trial data (capture.pcap, keylogs/, locust/requests/*.csv) is left
 in place under COLLECTION_DIR and is NOT duplicated into the new tree.
@@ -60,8 +67,10 @@ Usage:
     python3 reorg_by_cell.py /absolute/path/to/COLLECTION_DIR --output /some/other/dir
     python3 reorg_by_cell.py /absolute/path/to/COLLECTION_DIR --force
     python3 reorg_by_cell.py /absolute/path/to/COLLECTION_DIR --extract-script /path/to/extract_stream_metrics.py
+    python3 reorg_by_cell.py /absolute/path/to/COLLECTION_DIR --throttle-deltas-script /path/to/compute_throttle_deltas.py
 
-Requires: extract_stream_metrics.py (and, transitively, tshark + pandas).
+Requires: extract_stream_metrics.py and compute_throttle_deltas.py
+(and, transitively, tshark + pandas).
 """
 
 import argparse
@@ -83,6 +92,11 @@ def die(msg: str) -> None:
 def default_extract_script() -> Path:
     """extract_stream_metrics.py is expected to live alongside this script."""
     return Path(__file__).resolve().parent / "extract_stream_metrics.py"
+
+
+def default_throttle_deltas_script() -> Path:
+    """compute_throttle_deltas.py is expected to live alongside this script."""
+    return Path(__file__).resolve().parent / "compute_throttle_deltas.py"
 
 
 def visible_subdirs(path: Path):
@@ -120,16 +134,18 @@ def trial_already_done(dest: Path) -> bool:
     """
     A trial counts as already-processed only when ALL of its derived
     outputs are present: the per-stream CSV, the trial-wide fragmentation
-    summary, and the copied container_stats directory. Requiring all
-    three (rather than just the CSV) means a run that was interrupted
-    partway through process_trial() -- e.g. after the CSV was written
-    but before container_stats was copied over -- will be reprocessed on
+    summary, the per-trial throttle deltas, and the copied container_stats
+    directory. Requiring all four (rather than just the CSV) means a run
+    that was interrupted partway through process_trial() -- e.g. after the
+    CSV was written but before a later step ran -- will be reprocessed on
     a later pass, instead of being silently treated as complete with
     files missing.
     """
     if not (dest / "pcap_stream_metrics.csv").exists():
         return False
     if not (dest / "fragmentation_summary.csv").exists():
+        return False
+    if not (dest / "throttle_deltas.csv").exists():
         return False
     container_stats_dir = dest / "container_stats"
     return container_stats_dir.is_dir() and any(container_stats_dir.iterdir())
@@ -161,11 +177,11 @@ def copy_container_stats(trial_dir: Path, dest: Path):
         shutil.copy2(f, dest_dir / f.name)
 
 
-def process_trial(trial_dir: Path, dest: Path, extract_script: Path, log):
+def process_trial(trial_dir: Path, dest: Path, extract_script: Path, throttle_deltas_script: Path, log):
     """
-    Runs extract_stream_metrics.py for one trial, then copies over the
-    two outputs that script doesn't place in `dest` on its own
-    (fragmentation_summary.csv) and that it never produces at all
+    Runs extract_stream_metrics.py and compute_throttle_deltas.py for one
+    trial, then copies over the outputs neither script places in `dest`
+    on its own (fragmentation_summary.csv) or produces at all
     (container_stats/). Raises RuntimeError with a descriptive message
     on failure at any step; the caller catches this per-trial so one bad
     trial doesn't abort the whole collection.
@@ -206,6 +222,32 @@ def process_trial(trial_dir: Path, dest: Path, extract_script: Path, log):
 
     copy_container_stats(trial_dir, dest)
 
+    # throttle_stats.csv is a PER-CELL file (trial_dir.parent, i.e. the
+    # source cell directory -- one level up from the individual trial
+    # directories), holding one row per trial. compute_throttle_deltas.py
+    # is pointed at it explicitly rather than relying on its own default
+    # (<trial_dir>/../throttle_stats.csv), since --throttle-csv here means
+    # the SOURCE cell dir, which happens to equal that default -- being
+    # explicit keeps this correct even if reorg_by_cell.py's own directory
+    # assumptions ever change. Unlike fragmentation_summary.csv, this
+    # script supports --output directly, so no separate copy step is
+    # needed afterward.
+    throttle_deltas_csv = dest / "throttle_deltas.csv"
+    throttle_cmd = [
+        sys.executable, str(throttle_deltas_script),
+        str(trial_dir),
+        "--throttle-csv", str(trial_dir.parent / "throttle_stats.csv"),
+        "--output", str(throttle_deltas_csv),
+    ]
+    log(f"    Running: {' '.join(throttle_cmd)}")
+    throttle_result = subprocess.run(throttle_cmd, capture_output=True, text=True)
+    if throttle_result.returncode != 0:
+        stderr_tail = "\n".join(throttle_result.stderr.strip().splitlines()[-15:])
+        raise RuntimeError(
+            f"compute_throttle_deltas.py exited {throttle_result.returncode} for {trial_dir}\n"
+            f"--- stderr (tail) ---\n{stderr_tail}"
+        )
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("collection_dir", type=str,
@@ -217,6 +259,8 @@ def main():
                               "into an existing (non-empty) output directory.")
     parser.add_argument("--extract-script", type=str, default=None,
                          help="Path to extract_stream_metrics.py (default: looked for alongside this script)")
+    parser.add_argument("--throttle-deltas-script", type=str, default=None,
+                         help="Path to compute_throttle_deltas.py (default: looked for alongside this script)")
     args = parser.parse_args()
 
     collection_dir = Path(args.collection_dir).expanduser().resolve()
@@ -228,6 +272,12 @@ def main():
     if not extract_script.is_file():
         die(f"extract_stream_metrics.py not found at {extract_script}. "
             f"Pass --extract-script /path/to/extract_stream_metrics.py.")
+
+    throttle_deltas_script = (Path(args.throttle_deltas_script).expanduser().resolve()
+                               if args.throttle_deltas_script else default_throttle_deltas_script())
+    if not throttle_deltas_script.is_file():
+        die(f"compute_throttle_deltas.py not found at {throttle_deltas_script}. "
+            f"Pass --throttle-deltas-script /path/to/compute_throttle_deltas.py.")
 
     output_dir = (Path(args.output).expanduser().resolve() if args.output
                   else collection_dir.parent / f"{collection_dir.name}_by_cell")
@@ -254,6 +304,7 @@ def main():
         log(f"collection_dir: {collection_dir}")
         log(f"output_dir:     {output_dir}")
         log(f"extract_script: {extract_script}")
+        log(f"throttle_deltas_script: {throttle_deltas_script}")
         log(f"force:          {args.force}")
         log("")
 
@@ -279,7 +330,7 @@ def main():
                 continue
 
             try:
-                process_trial(trial_dir, dest, extract_script, log)
+                process_trial(trial_dir, dest, extract_script, throttle_deltas_script, log)
                 log(f"    OK -> {dest}")
                 processed += 1
             except Exception as e:
