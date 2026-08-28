@@ -4,8 +4,9 @@ reorg_by_cell.py
 
 Reorganizes a trial collection directory into a sibling directory
 containing ONLY the derived per-repetition analysis output
-(pcap_stream_metrics.csv and fragmentation_summary.csv) for every trial,
-in the same cell -> repetition layout as the original.
+(pcap_stream_metrics.csv, fragmentation_summary.csv, and the
+container_stats/ CPU-mem-network CSVs) for every trial, in the same
+cell -> repetition layout as the original.
 
 Expected input layout (as produced by run_matrix.sh / run_trial.sh):
 
@@ -15,6 +16,10 @@ Expected input layout (as produced by run_matrix.sh / run_trial.sh):
           capture.pcap
           keylogs/
           locust/requests/worker_*.csv
+          container_stats/
+            locust_cpu_matrix_<run_id>.csv
+            nginx_cpu_matrix_<run_id>.csv
+            router_cpu_matrix_<run_id>.csv
           ...
 
 Output layout (default: a sibling directory named "<COLLECTION_DIR>_by_cell"):
@@ -24,13 +29,19 @@ Output layout (default: a sibling directory named "<COLLECTION_DIR>_by_cell"):
         rep_<N>/
           pcap_stream_metrics.csv
           fragmentation_summary.csv
+          container_stats/
+            locust_cpu_matrix_<run_id>.csv
+            nginx_cpu_matrix_<run_id>.csv
+            router_cpu_matrix_<run_id>.csv
 
 For each trial directory, this script invokes extract_stream_metrics.py,
 pointing its --output flag directly at the new pcap_stream_metrics.csv
 location. extract_stream_metrics.py always writes fragmentation_summary.csv
 into the original trial directory (it has no --output flag for that file),
 so this script copies it into the new location afterward rather than
-relying on the subprocess to place it there directly. Keylog material is
+relying on the subprocess to place it there directly. The container_stats/
+files are copied over as-is, unmodified -- they need no extraction step,
+just relocation alongside the derived per-stream data. Keylog material is
 used only through temporary files and is not retained in either directory.
 
 Raw trial data (capture.pcap, keylogs/, locust/requests/*.csv) is left
@@ -107,22 +118,57 @@ def find_trials(collection_dir: Path, log):
 
 def trial_already_done(dest: Path) -> bool:
     """
-    A trial counts as already-processed only when BOTH of its derived
-    outputs are present: the per-stream CSV and the trial-wide
-    fragmentation summary. Requiring both (rather than just the CSV)
-    means a run that was interrupted after the per-stream CSV was
-    written but before the fragmentation summary was copied over will
-    be reprocessed on a later pass, instead of being silently treated
-    as complete with a missing file.
+    A trial counts as already-processed only when ALL of its derived
+    outputs are present: the per-stream CSV, the trial-wide fragmentation
+    summary, and the copied container_stats directory. Requiring all
+    three (rather than just the CSV) means a run that was interrupted
+    partway through process_trial() -- e.g. after the CSV was written
+    but before container_stats was copied over -- will be reprocessed on
+    a later pass, instead of being silently treated as complete with
+    files missing.
     """
-    return (dest / "pcap_stream_metrics.csv").exists() and (dest / "fragmentation_summary.csv").exists()
+    if not (dest / "pcap_stream_metrics.csv").exists():
+        return False
+    if not (dest / "fragmentation_summary.csv").exists():
+        return False
+    container_stats_dir = dest / "container_stats"
+    return container_stats_dir.is_dir() and any(container_stats_dir.iterdir())
+
+
+def copy_container_stats(trial_dir: Path, dest: Path):
+    """
+    Copies every file under trial_dir/container_stats/ (the per-second
+    CPU/memory/network-IO CSVs for oqs-locust, oqs-nginx, and router,
+    written by run_trial.sh's background monitor) into
+    dest/container_stats/.
+
+    Copies whatever files are present rather than hardcoding the three
+    filenames run_trial.sh currently produces (each of which embeds the
+    run_id) -- so this doesn't need a matching edit here if that naming
+    convention or the set of monitored containers ever changes.
+    """
+    source_dir = trial_dir / "container_stats"
+    if not source_dir.is_dir():
+        raise RuntimeError(f"{source_dir} not found -- expected container CPU/mem/net-IO stats.")
+
+    stat_files = sorted(p for p in source_dir.iterdir() if p.is_file())
+    if not stat_files:
+        raise RuntimeError(f"{source_dir} exists but contains no files.")
+
+    dest_dir = dest / "container_stats"
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    for f in stat_files:
+        shutil.copy2(f, dest_dir / f.name)
 
 
 def process_trial(trial_dir: Path, dest: Path, extract_script: Path, log):
     """
-    Runs extract_stream_metrics.py for one trial.
-    Raises RuntimeError with a descriptive message on failure; the caller
-    catches this per-trial so one bad trial doesn't abort the whole collection.
+    Runs extract_stream_metrics.py for one trial, then copies over the
+    two outputs that script doesn't place in `dest` on its own
+    (fragmentation_summary.csv) and that it never produces at all
+    (container_stats/). Raises RuntimeError with a descriptive message
+    on failure at any step; the caller catches this per-trial so one bad
+    trial doesn't abort the whole collection.
     """
     dest.mkdir(parents=True, exist_ok=True)
 
@@ -157,6 +203,8 @@ def process_trial(trial_dir: Path, dest: Path, extract_script: Path, log):
             f"is up to date."
         )
     shutil.copy2(source_fragmentation_csv, dest / "fragmentation_summary.csv")
+
+    copy_container_stats(trial_dir, dest)
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
