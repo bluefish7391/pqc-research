@@ -7,7 +7,7 @@ single master CSV, as a sibling of that directory, with one row per trial
 (cell x repetition).
 
 Each row has the trial's conditions (kem group, concurrent users, network
-condition label B1-B4) plus P50/P90/P99 handshake latency computed from that
+condition label B1-B4) plus P50/P90/P95 handshake latency computed from that
 trial's already-filtered pcap_stream_metrics.csv (stream_span_ms column).
 
 Expected input layout (as produced by filter_for_window.py):
@@ -40,7 +40,7 @@ CELL_NAME_RE = re.compile(
     r"^(?P<kem_group>[A-Za-z0-9]+)_u(?P<concurrent_users>\d+)_rtt(?P<rtt_ms>\d+)ms_loss(?P<loss_pct>\d+)pct$"
 )
 REP_DIR_RE = re.compile(r"^rep_(?P<num>\d+)$")
-PERCENTILE_SPECS = (("p50_latency_ms", 50.0), ("p90_latency_ms", 90.0), ("p99_latency_ms", 99.0))
+PERCENTILE_SPECS = (("p50_latency_ms", 50.0), ("p90_latency_ms", 90.0), ("p95_latency_ms", 95.0))
 
 # Mirrors NETWORK_CONDITIONS in main/orchestration/experimental_vars.sh.
 NETWORK_CONDITION_LABELS = {
@@ -185,7 +185,7 @@ def main():
         "repetition",
         "p50_latency_ms",
         "p90_latency_ms",
-        "p99_latency_ms",
+        "p95_latency_ms",
         "handshake_count",
     ]
 
@@ -215,7 +215,7 @@ def main():
                     "repetition": rep_number,
                     "p50_latency_ms": percentile(latencies, 50.0),
                     "p90_latency_ms": percentile(latencies, 90.0),
-                    "p99_latency_ms": percentile(latencies, 99.0),
+                    "p95_latency_ms": percentile(latencies, 95.0),
                     "handshake_count": len(latencies),
                 }
                 writer.writerow(row)
